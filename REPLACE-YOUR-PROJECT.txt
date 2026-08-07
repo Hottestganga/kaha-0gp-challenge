@@ -1,0 +1,6 @@
+1. Close IntelliJ.
+2. Copy all files and folders from this package into your existing Kaha-0gp-race-main folder.
+3. Choose Replace files when Windows asks.
+4. Reopen the folder in IntelliJ.
+5. Open the Gradle tool window and click Reload All Gradle Projects.
+6. Run Tasks > build > build, then run the custom Gradle task named run.
