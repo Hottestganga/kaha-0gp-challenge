@@ -1,0 +1,20 @@
+0GP Race v1.1e - 30 Second Over-Budget Grace
+
+What changed
+- Going below 0 GP no longer instantly disqualifies the player.
+- A 30-second wall-clock grace period starts the first time the score becomes negative.
+- The sidebar status shows the negative balance and seconds until DQ.
+- Returning enough imported value to reach 0 GP or higher cancels the countdown immediately.
+- Going more negative does NOT restart the 30-second timer.
+- Logging out does NOT pause the over-budget countdown (prevents abuse).
+- If the grace period expires while still negative, the run is disqualified.
+- Activity log records OVER BUDGET, BUDGET RESTORED, and DISQUALIFIED events.
+- If race time reaches zero while the player is still negative, the run is disqualified.
+
+Test
+1. Start at 0 GP.
+2. Withdraw an old item so score becomes negative.
+3. Confirm OVER BUDGET and a countdown near 30 seconds appears.
+4. Deposit the imported item back before 30 seconds. Confirm race continues and event log says BUDGET RESTORED.
+5. Repeat and leave the score negative for >30 seconds. Confirm DQ.
+6. Repeat, go negative, log out, wait >30 seconds. Confirm the grace timer did not pause.

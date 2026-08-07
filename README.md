@@ -1,28 +1,47 @@
-# Kaha 0GP Race
+# 0GP Race
 
-RuneLite Plugin Hub project for timed zero-GP loot races.
+**Developer: Ganga**
 
-## Current milestone
+0GP Race is a RuneLite external plugin for timed zero-GP races. Players earn score from legitimate in-race wealth generation while imported value from outside the race is debited by the ledger.
 
-This repository now contains a real RuneLite external-plugin project with:
+## v1.1b local multiplayer alpha
 
-- a RuneLite sidebar panel;
-- an **Open Dashboard** button;
-- room and dashboard settings;
-- NPC and PvP loot-event matching;
-- ground-item **Take** click matching; and
-- inventory-increase confirmation before a pickup is submitted.
+The plugin remains a normal RuneLite plugin. This build adds a temporary local multiplayer backend only for development testing before the API is hosted publicly.
 
-The public race server and hosted dashboard are the next milestone. Tracking is disabled by default until a valid HTTPS dashboard/server URL and room code are configured.
+Current features include:
 
-## Scoring rule
+- Create Race / Join Race / Leave Race from the RuneLite sidebar.
+- Variable race duration and starting GP allowance.
+- Logged-in playtime timer that pauses on logout.
+- NPC/PvP loot, pickpocket/container, thieving and world-spawn provenance foundations.
+- Race-owned inventory/bank ledger.
+- Pre-race bank withdrawals debit score and returning imported items refunds the debit.
+- Negative balance disqualification.
+- Timestamped activity log and race statistics.
+- Live multiplayer room/player list with score, timer state and login state syncing roughly every two seconds.
 
-Players start at 0 GP. The future server will value accepted item IDs and quantities. The plugin submits an item only after RuneLite reports eligible NPC/PvP loot, the player clicks **Take**, and the matching quantity enters inventory.
+## Local multiplayer test server
+
+Open `local-server` and run `run-server.bat`. Keep that window open while testing.
+
+In RuneLite plugin settings use:
+
+- Multiplayer enabled: ON
+- Multiplayer API URL: `http://127.0.0.1:8787`
+
+Create a race on one development client, then enter that room code in Join Race on another client/account. See `V1.1B-MULTIPLAYER-TEST.txt` for two-PC/LAN instructions.
+
+The local server is development-only. It has no authentication and stores rooms in memory. v1.1c will move this API to hosted infrastructure.
 
 ## Development
 
-Use IntelliJ IDEA and Java 11. Open the repository as a Gradle project, then run the Gradle `run` task.
+Use IntelliJ IDEA with the RuneLite external-plugin project and Java 11 target. Run:
 
-## Data sent when tracking is enabled
+`./gradlew.bat clean build`
 
-Room code, logged-in RuneScape display name, item ID, quantity, and source (`NPC` or `PVP`) are sent to the configured HTTPS server.
+then:
+
+`./gradlew.bat run`
+
+## v1.1c hosted multiplayer alpha
+The RuneLite plugin can now use the included deployable `hosted-server`. Deploy it to a public host, then paste its HTTPS URL into **Multiplayer API URL** in the plugin settings. See `hosted-server/README.md`.

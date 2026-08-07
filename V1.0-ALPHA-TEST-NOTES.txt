@@ -1,0 +1,21 @@
+0GP Race v1.0 Alpha - Transaction Engine refactor
+
+This build is intended to behave the same as v0.9 while moving scoring into a reusable transaction engine.
+
+New:
+- TransactionEngine stores every scoring/internal-transfer transaction.
+- RaceTransaction model records source, value, score delta, ownership and status.
+- RaceSource enum normalises NPC/PvP/pickpocket/thieving/world-spawn/bank sources.
+- Race Statistics button shows score, positive GP, imported value, transaction count and biggest event.
+- LootSource interface is included as the migration point for future source-specific detector classes.
+
+Regression tests:
+1. NPC ground drop still scores.
+2. World spawn still scores.
+3. Pickpocket/coin pouch still scores.
+4. Old bank withdrawal debits score.
+5. Returning that old bank item refunds score.
+6. Race-owned bank deposit/withdrawal stays 0 GP.
+7. Starting allowance works.
+8. Logout pauses timer.
+9. Race Stats button displays totals matching the sidebar/event log.

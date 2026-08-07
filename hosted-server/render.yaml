@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: 0gp-race-api
+    runtime: node
+    plan: free
+    rootDir: hosted-server
+    buildCommand: ""
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: ROOM_TTL_MS
+        value: 86400000

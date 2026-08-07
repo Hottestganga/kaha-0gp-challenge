@@ -1,0 +1,21 @@
+0GP Race v1.1b - Multiplayer Room Alpha
+=======================================
+
+Added
+- Local multiplayer API test server (JDK only, no external server dependencies).
+- Create Race registers the room with the API.
+- Join Race now joins the host's real room configuration; joiners no longer enter their own duration/allowance.
+- Live player leaderboard in the RuneLite sidebar.
+- Score, remaining playtime, login state and race state sync every ~2 seconds.
+- Leave Race removes the player from the local room.
+- Multiplayer connection status shown in the sidebar.
+- Plugin settings for multiplayer enable/disable and API URL.
+
+Preserved
+- 0GP Race / Ganga branding.
+- Transaction engine and activity log.
+- Starting allowance.
+- Bank debit/refund ledger.
+- Negative-balance DQ.
+- Logout timer pause.
+- NPC/PvP/world-spawn/pickpocket/container/thieving source work.

@@ -1,0 +1,21 @@
+0GP Race v1.1c - Hosted Multiplayer Alpha
+Developer: Ganga
+
+WHAT THIS RELEASE DOES
+- Keeps the working RuneLite plugin and v1.1b live room/leaderboard sync.
+- Adds a deployable hosted Node.js API in /hosted-server.
+- Same API contract as the local v1.1b server, so no local server is required after deployment.
+- Adds health checking, stale-player pause handling and 24-hour inactive room cleanup.
+- Server requires no npm dependencies.
+
+HOW TO TEST BEFORE HOSTING
+1. Open a terminal in hosted-server.
+2. Run: node server.js
+3. Set RuneLite Multiplayer API URL to http://127.0.0.1:8787
+4. Create/join a race as in v1.1b.
+
+HOW TO GO PUBLIC
+Follow hosted-server/README.md. Once deployed, paste the public HTTPS URL into the plugin settings on each client.
+
+ALPHA LIMITATION
+The hosted server is in-memory. Server restarts clear rooms. Persistence/database support comes next.

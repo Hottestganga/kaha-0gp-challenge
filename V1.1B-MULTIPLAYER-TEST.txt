@@ -1,0 +1,31 @@
+0GP Race v1.1b - Local Multiplayer Alpha
+========================================
+
+This is still a RuneLite plugin. The local-server folder is only a temporary
+multiplayer test backend. v1.1c will replace it with a hosted server.
+
+TEST ON ONE PC
+1. Open local-server and double-click run-server.bat.
+2. Keep the server window open. It should say it is listening on port 8787.
+3. In 0GP Race plugin settings, confirm:
+   Multiplayer enabled = ON
+   Multiplayer API URL = http://127.0.0.1:8787
+4. Run the first RuneLite dev client and create a race.
+5. Run a second RuneLite dev client/account, choose Join Race, and enter the room code.
+6. Both sidebars should show both player names and scores in Live players.
+7. Earn loot on either account and confirm the other client sees the score update within ~2 seconds.
+8. Log one player out and confirm its state changes to PAUSED.
+
+TEST ON TWO PCS ON THE SAME NETWORK
+1. Run local-server on the host PC.
+2. Find the host PC's IPv4 address with ipconfig (example 192.168.1.50).
+3. On BOTH plugins set Multiplayer API URL to http://HOST-IP:8787
+   Example: http://192.168.1.50:8787
+4. Windows Firewall may ask to allow Java network access. Allow it on Private networks.
+
+KNOWN ALPHA LIMITATIONS
+- No authentication/security yet.
+- Server data is memory-only and resets when the server closes.
+- Room code collision is possible; simply create a new race if it happens.
+- No public website yet.
+- This local test server is not intended for Plugin Hub distribution.

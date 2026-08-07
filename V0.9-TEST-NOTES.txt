@@ -1,0 +1,18 @@
+0GP Race v0.9 source-expansion test
+
+New in this build:
+- Natural map/world ground spawns can count when actually picked up.
+- Player-dropped ground items are excluded from the world-spawn path by RuneLite ground-item ownership.
+- Pickpocketing remains supported.
+- Race-owned container contents remain supported (coin pouches/caskets-style flows).
+- Direct-to-inventory thieving game-object rewards now have a short provenance window for Steal-from, Pick-lock, Search, Loot and Open actions.
+- NPC loot, PvP loot, bank ledger, starting allowance, negative-balance DQ, logout pause, and event log are preserved.
+
+Suggested tests:
+1. NPC drop -> pick it up -> must count.
+2. Natural map spawn -> pick it up -> should count as WORLD SPAWN.
+3. Have another player drop an item -> pick it up -> should NOT count as WORLD SPAWN.
+4. Pickpocket -> open coin pouch -> coins should count.
+5. Thieving stall/chest -> direct inventory reward should count as THIEVING.
+6. PvP loot -> if convenient, confirm picked-up kill loot counts as PVP.
+7. Old bank withdrawal -> debit/DQ behavior should remain unchanged.

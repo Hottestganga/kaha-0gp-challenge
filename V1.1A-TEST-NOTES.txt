@@ -1,0 +1,29 @@
+0GP Race v1.1a - Rebrand + Networking Foundation
+
+This is still a RuneLite plugin. No hosted multiplayer traffic is enabled yet.
+
+Branding changes:
+- Plugin name: 0GP Race
+- Developer/author: Ganga
+- Java package: com.ganga.zerogprace
+- Gradle project name: 0gp-race
+
+Networking foundation added:
+- network/MultiplayerClient.java
+- network/NetworkStatus.java
+- network/RaceSyncPayload.java
+
+Regression test checklist:
+1. Plugin appears as "0GP Race" in RuneLite.
+2. Sidebar tooltip/title says "0GP Race".
+3. Create a race and verify timer starts.
+4. Verify logout pauses and login resumes.
+5. NPC loot still scores.
+6. World-spawn loot still scores.
+7. Starting allowance still works.
+8. Pre-race bank withdrawal debits score.
+9. Returning imported bank item refunds the debit.
+10. Race Stats and Event Log still work.
+
+The networking classes are scaffolding only in v1.1a. They intentionally do not
+contact a server yet, so this release should behave like the working v1.0 alpha.

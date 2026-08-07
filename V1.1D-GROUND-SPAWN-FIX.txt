@@ -1,0 +1,14 @@
+0GP Race v1.1d - Ground Spawn First-Pickup Fix
+
+Fix:
+- Natural ground items that are already loaded before a race starts are now seeded into the eligible world-spawn cache.
+- Previously, the plugin depended on RuneLite's ItemSpawned event, so an item already visible before the race began could fail to score on the first pickup.
+- Normal ItemSpawned handling remains unchanged for items that appear after the race starts.
+
+Regression test:
+1. Stand near a known natural map spawn and wait until the item is visible.
+2. Start a fresh race while that item is already on the ground.
+3. Pick it up immediately. It should score on the first pickup.
+4. Wait for it to respawn and pick it up again. It should also score.
+5. Verify an NPC drop still scores.
+6. Verify bank import/refund and multiplayer sync still behave as before.
