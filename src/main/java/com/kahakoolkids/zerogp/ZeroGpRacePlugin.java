@@ -26,6 +26,7 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.NpcLootReceived;
 import net.runelite.client.events.PlayerLootReceived;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStack;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -58,6 +59,7 @@ public class ZeroGpRacePlugin extends Plugin
     @Inject private Client client;
     @Inject private OkHttpClient httpClient;
     @Inject private Gson gson;
+    @Inject private ItemManager itemManager;
     @Inject private ZeroGpRaceConfig config;
     @Inject private ClientToolbar clientToolbar;
 
@@ -68,7 +70,6 @@ public class ZeroGpRacePlugin extends Plugin
     private ZeroGpRacePanel panel;
     private NavigationButton navigationButton;
     private boolean inventoryPrimed;
-    private long acceptedItemCount;
 
     @Provides
     ZeroGpRaceConfig provideConfig(ConfigManager manager)
@@ -89,7 +90,16 @@ public class ZeroGpRacePlugin extends Plugin
             .panel(panel)
             .build();
         clientToolbar.addNavigation(navigationButton);
-        refreshPanel("Waiting");
+
+        if (client.getGameState() == GameState.LOGGED_IN)
+        {
+            panel.onLoggedIn(currentPlayerName());
+            primeInventory();
+        }
+        else
+        {
+            panel.onLoggedOut();
+        }
     }
 
     @Override
@@ -104,16 +114,16 @@ public class ZeroGpRacePlugin extends Plugin
         resetTrackingState();
     }
 
-    void openDashboard()
+    void openDashboard(String roomCode)
     {
         String base = cleanHttpsBase(config.dashboardUrl());
         if (base == null)
         {
-            refreshPanel("Set dashboard URL");
+            LinkBrowser.browse("https://github.com/Hottestganga/kaha-0gp-challenge");
             return;
         }
 
-        String room = normaliseRoom(config.roomCode());
+        String room = normaliseRoom(roomCode);
         String url = room.isEmpty() ? base : base + (base.contains("?") ? "&" : "?")
             + "room=" + URLEncoder.encode(room, StandardCharsets.UTF_8);
         LinkBrowser.browse(url);
@@ -122,15 +132,30 @@ public class ZeroGpRacePlugin extends Plugin
     @Subscribe
     public void onGameStateChanged(GameStateChanged event)
     {
-        if (event.getGameState() != GameState.LOGGED_IN)
+        if (panel == null)
         {
-            previousInventory.clear();
-            inventoryPrimed = false;
-            refreshPanel("Waiting for login");
+            return;
         }
-        else
+
+        if (event.getGameState() == GameState.LOGGED_IN)
         {
-            refreshPanel(canTrack() ? "Tracking" : "Configure plugin");
+            SwingUtilities.invokeLater(() -> panel.onLoggedIn(currentPlayerName()));
+            primeInventory();
+            return;
+        }
+
+        switch (event.getGameState())
+        {
+            case LOGIN_SCREEN:
+            case LOGIN_SCREEN_AUTHENTICATOR:
+            case CONNECTION_LOST:
+            case HOPPING:
+                previousInventory.clear();
+                inventoryPrimed = false;
+                SwingUtilities.invokeLater(panel::onLoggedOut);
+                break;
+            default:
+                break;
         }
     }
 
@@ -149,7 +174,7 @@ public class ZeroGpRacePlugin extends Plugin
     @Subscribe
     public void onMenuOptionClicked(MenuOptionClicked event)
     {
-        if (!canTrack() || !"Take".equalsIgnoreCase(event.getMenuOption()))
+        if (!canTrackLoot() || !"Take".equalsIgnoreCase(event.getMenuOption()))
         {
             return;
         }
@@ -175,7 +200,7 @@ public class ZeroGpRacePlugin extends Plugin
     @Subscribe
     public void onItemContainerChanged(ItemContainerChanged event)
     {
-        if (!canTrack())
+        if (!canTrackLoot())
         {
             return;
         }
@@ -208,7 +233,7 @@ public class ZeroGpRacePlugin extends Plugin
             AcceptedLoot accepted = consumeEligibleDrop(itemId, gained);
             if (accepted.quantity > 0)
             {
-                sendAcceptedPickup(itemId, accepted.quantity, accepted.source);
+                acceptPickup(itemId, accepted.quantity, accepted.source);
             }
         }
 
@@ -218,7 +243,7 @@ public class ZeroGpRacePlugin extends Plugin
 
     private void rememberDrops(Iterable<ItemStack> items, String source)
     {
-        if (!canTrack())
+        if (!canTrackLoot())
         {
             return;
         }
@@ -234,56 +259,85 @@ public class ZeroGpRacePlugin extends Plugin
         purgeExpired();
     }
 
-    private void sendAcceptedPickup(int itemId, int quantity, String source)
+    private void acceptPickup(int itemId, int quantity, String source)
     {
+        ZeroGpRacePanel currentPanel = panel;
+
+        int unitPrice = Math.max(0, itemManager.getItemPrice(itemId));
+        long totalValue = (long) unitPrice * quantity;
+        String itemName = itemManager.getItemComposition(itemId).getName();
+
+        if (currentPanel != null)
+        {
+            SwingUtilities.invokeLater(() ->
+                currentPanel.addAcceptedLoot(itemName, quantity, totalValue, source));
+        }
+
+        log.info("Accepted {} loot: {} x{} worth {} gp", source, itemName, quantity, totalValue);
+
         String base = cleanHttpsBase(config.dashboardUrl());
-        if (base == null)
+        String room = currentPanel == null ? "" : normaliseRoom(currentPanel.getActiveRoomCode());
+        if (base == null || room.isEmpty() || !config.trackingEnabled())
         {
             return;
         }
 
-        PickupPayload payload = new PickupPayload(
-            normaliseRoom(config.roomCode()), currentPlayerName(), itemId, quantity, source);
+        PickupPayload payload = new PickupPayload(room, currentPlayerName(), itemId, quantity, source);
         Request request = new Request.Builder()
             .url(base + "/api/pickup")
             .post(RequestBody.create(JSON, gson.toJson(payload)))
             .build();
 
-        refreshPanel("Sending loot");
         httpClient.newCall(request).enqueue(new Callback()
         {
             @Override
             public void onFailure(Call call, IOException exception)
             {
                 log.warn("Unable to submit 0GP race pickup", exception);
-                refreshPanel("Connection failed");
             }
 
             @Override
             public void onResponse(Call call, Response response)
             {
-                try (Response ignored = response)
-                {
-                    if (response.isSuccessful())
-                    {
-                        acceptedItemCount += quantity;
-                        refreshPanel("Tracking");
-                    }
-                    else
-                    {
-                        refreshPanel("Server rejected pickup");
-                    }
-                }
+                response.close();
             }
         });
     }
 
-    private boolean canTrack()
+
+    void onLocalRaceStarted()
     {
-        return config.trackingEnabled()
-            && client.getGameState() == GameState.LOGGED_IN
-            && cleanHttpsBase(config.dashboardUrl()) != null
-            && !normaliseRoom(config.roomCode()).isEmpty();
+        resetTrackingState();
+        primeInventory();
+    }
+
+    private void primeInventory()
+    {
+        if (client.getGameState() != GameState.LOGGED_IN)
+        {
+            inventoryPrimed = false;
+            previousInventory.clear();
+            return;
+        }
+
+        ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
+        if (inventory == null)
+        {
+            inventoryPrimed = false;
+            previousInventory.clear();
+            return;
+        }
+
+        previousInventory.clear();
+        previousInventory.putAll(snapshot(inventory));
+        inventoryPrimed = true;
+    }
+
+    private boolean canTrackLoot()
+    {
+        return panel != null
+            && panel.isRaceRunning()
+            && client.getGameState() == GameState.LOGGED_IN;
     }
 
     private static Map<Integer, Integer> snapshot(ItemContainer inventory)
@@ -358,20 +412,6 @@ public class ZeroGpRacePlugin extends Plugin
         takeClicks.removeIf(click -> click.expiresAt < now);
     }
 
-    private void refreshPanel(String status)
-    {
-        ZeroGpRacePanel currentPanel = panel;
-        if (currentPanel == null)
-        {
-            return;
-        }
-
-        String room = normaliseRoom(config.roomCode());
-        String player = currentPlayerName();
-        SwingUtilities.invokeLater(
-            () -> currentPanel.updateState(status, room, player, acceptedItemCount));
-    }
-
     private String currentPlayerName()
     {
         return client.getLocalPlayer() == null || client.getLocalPlayer().getName() == null
@@ -384,7 +424,6 @@ public class ZeroGpRacePlugin extends Plugin
         eligibleDrops.clear();
         takeClicks.clear();
         inventoryPrimed = false;
-        acceptedItemCount = 0;
     }
 
     private static String cleanHttpsBase(String value)
