@@ -1,47 +1,127 @@
 # 0GP Race
 
-**Developer: Ganga**
+> The ultimate GP racing plugin for Old School RuneScape.
 
-0GP Race is a RuneLite external plugin for timed zero-GP races. Players earn score from legitimate in-race wealth generation while imported value from outside the race is debited by the ledger.
+Compete against friends in real-time to earn the most wealth from **0 GP** before the timer expires.
 
-## v1.1b local multiplayer alpha
+Designed for clan competitions, PvM events, Discord challenges and community tournaments.
 
-The plugin remains a normal RuneLite plugin. This build adds a temporary local multiplayer backend only for development testing before the API is hosted publicly.
+---
 
-Current features include:
+## Features
 
-- Create Race / Join Race / Leave Race from the RuneLite sidebar.
-- Variable race duration and starting GP allowance.
-- Logged-in playtime timer that pauses on logout.
-- NPC/PvP loot, pickpocket/container, thieving and world-spawn provenance foundations.
-- Race-owned inventory/bank ledger.
-- Pre-race bank withdrawals debit score and returning imported items refunds the debit.
-- Negative balance disqualification.
-- Timestamped activity log and race statistics.
-- Live multiplayer room/player list with score, timer state and login state syncing roughly every two seconds.
+### Create Custom Races
 
-## Local multiplayer test server
+- Create private races
+- Join races using a room code
+- Custom race duration
+- Optional starting GP allowance
 
-Open `local-server` and run `run-server.bat`. Keep that window open while testing.
+---
 
-In RuneLite plugin settings use:
+### Live GP Tracking
 
-- Multiplayer enabled: ON
-- Multiplayer API URL: `http://127.0.0.1:8787`
+- Live race timer
+- Real-time GP total
+- Activity log
+- Race statistics
+- Pause timer on logout
 
-Create a race on one development client, then enter that room code in Join Race on another client/account. See `V1.1B-MULTIPLAYER-TEST.txt` for two-PC/LAN instructions.
+---
 
-The local server is development-only. It has no authentication and stores rooms in memory. v1.1c will move this API to hosted infrastructure.
+### Anti-Cheat System
 
-## Development
+0GP Race uses a transaction-based scoring system to ensure races remain fair.
 
-Use IntelliJ IDEA with the RuneLite external-plugin project and Java 11 target. Run:
+Supported protection includes:
 
-`./gradlew.bat clean build`
+- Imported bank item detection
+- Bank withdrawal deductions
+- Race-owned item tracking
+- Starting allowance support
+- 30-second over-budget grace period
+- Trade protection
+- Transaction ledger
 
-then:
+---
 
-`./gradlew.bat run`
+### Currently Supported Activities
 
-## v1.1c hosted multiplayer alpha
-The RuneLite plugin can now use the included deployable `hosted-server`. Deploy it to a public host, then paste its HTTPS URL into **Multiplayer API URL** in the plugin settings. See `hosted-server/README.md`.
+✔ NPC Drops
+
+✔ Ground Item Spawns
+
+✔ Pickpocketing
+
+✔ Coin Pouches
+
+✔ Bank Deposits
+
+✔ Bank Withdrawals
+
+✔ Starting GP Allowance
+
+Additional activities will continue to be added during beta.
+
+---
+
+## Roadmap
+
+### Plugin
+
+- Additional loot sources
+- More race statistics
+- Team races
+- Hardcore mode
+- Additional race settings
+
+### Backend
+
+- Hosted race server
+- Live room management
+- Online player synchronisation
+
+### Website
+
+- Live leaderboard
+- Spectator mode
+- Player profiles
+- Race history
+- Tournament brackets
+
+---
+
+## Installation
+
+Currently in private alpha.
+
+Plugin Hub release coming soon.
+
+---
+
+## Bug Reports
+
+Found a bug?
+
+Please include:
+
+- Plugin version
+- RuneLite version
+- What happened
+- What should have happened
+- Steps to reproduce
+- Screenshot (if possible)
+
+---
+
+## License
+
+MIT License
+
+---
+
+## Developed By
+
+**Ganga**
+
+For Old School RuneScape community events.
