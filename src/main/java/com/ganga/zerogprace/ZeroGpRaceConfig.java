@@ -10,10 +10,13 @@ public interface ZeroGpRaceConfig extends Config
     String GROUP = "zerogprace";
 
     @ConfigItem(
-        keyName = "multiplayerEnabled",
-        name = "Multiplayer enabled",
-        description = "Connect Create/Join Race to the multiplayer API",
-        position = 0
+            keyName = "multiplayerEnabled",
+            name = "Multiplayer enabled",
+            description = "Connects to the 0GP Race third-party multiplayer server. "
+                    + "When enabled, the plugin may send your RuneScape display name, race room code, "
+                    + "race score, race status, remaining race time, and race transaction data required "
+                    + "for multiplayer scoring and verification.",
+            position = 0
     )
     default boolean multiplayerEnabled()
     {
@@ -21,10 +24,10 @@ public interface ZeroGpRaceConfig extends Config
     }
 
     @ConfigItem(
-        keyName = "apiUrl",
-        name = "Multiplayer API URL",
-        description = "Hosted API address. Use your public HTTPS server URL, or http://127.0.0.1:8787 for local testing",
-        position = 1
+            keyName = "apiUrl",
+            name = "Multiplayer API URL",
+            description = "Address of the third-party 0GP Race multiplayer API.",
+            position = 1
     )
     default String apiUrl()
     {
@@ -32,10 +35,10 @@ public interface ZeroGpRaceConfig extends Config
     }
 
     @ConfigItem(
-        keyName = "dashboardUrl",
-        name = "Dashboard URL",
-        description = "Public HTTPS address for the future race dashboard",
-        position = 2
+            keyName = "dashboardUrl",
+            name = "Dashboard URL",
+            description = "Public HTTPS address for the 0GP Race live dashboard.",
+            position = 2
     )
     default String dashboardUrl()
     {
@@ -43,10 +46,10 @@ public interface ZeroGpRaceConfig extends Config
     }
 
     @ConfigItem(
-        keyName = "roomCode",
-        name = "Room code",
-        description = "Optional saved room code",
-        position = 3
+            keyName = "roomCode",
+            name = "Room code",
+            description = "Optional saved multiplayer race room code.",
+            position = 3
     )
     default String roomCode()
     {
@@ -54,10 +57,10 @@ public interface ZeroGpRaceConfig extends Config
     }
 
     @ConfigItem(
-        keyName = "trackingEnabled",
-        name = "Legacy pickup API",
-        description = "Legacy pickup-only sync from early alpha builds. Leave disabled.",
-        position = 4
+            keyName = "trackingEnabled",
+            name = "Legacy pickup API",
+            description = "Legacy pickup-only sync from early alpha builds. Leave disabled.",
+            position = 4
     )
     default boolean trackingEnabled()
     {
