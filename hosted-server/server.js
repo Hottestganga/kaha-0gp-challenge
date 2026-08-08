@@ -65,6 +65,7 @@ function snapshot(room) {
     createdAt: room.createdAt,
     lastActivity: room.lastActivity,
     deadSince: room.deadSince || null,
+    finishedAt: room.finishedAt || null,
     players
   };
 }
@@ -114,6 +115,54 @@ function isDeadRoom(room) {
   return room.players.size === 0 || allPlayersDisqualified(room);
 }
 
+function isFinishedRoom(room) {
+  if (!room || room.players.size === 0 || isDeadRoom(room)) {
+    return false;
+  }
+
+  const players = [...room.players.values()];
+
+  // A legitimate completed race has at least one FINISHED player and no
+  // still-active participant states. Mixed FINISHED + DQ is preserved.
+  const hasFinished = players.some(player =>
+    normalizedRaceState(player) === 'FINISHED'
+  );
+
+  if (!hasFinished) {
+    return false;
+  }
+
+  return players.every(player => {
+    const state = normalizedRaceState(player);
+    return state === 'FINISHED' || state === 'DQ' || state === 'DISQUALIFIED';
+  });
+}
+
+function finishedRoomSnapshots() {
+  return [...rooms.values()]
+    .filter(isFinishedRoom)
+    .sort((a, b) => b.lastActivity - a.lastActivity)
+    .map(room => {
+      const data = snapshot(room);
+      const standings = [...data.players].sort((a, b) =>
+        (b.score - a.score) || a.playerName.localeCompare(b.playerName)
+      );
+
+      const winner = standings.find(player =>
+        normalizedRaceState(player) === 'FINISHED'
+      ) || standings[0] || null;
+
+      return {
+        ...data,
+        finishedAt: room.finishedAt || room.lastActivity,
+        winner: winner ? {
+          playerName: winner.playerName,
+          score: winner.score
+        } : null
+      };
+    });
+}
+
 function refreshRoomLifecycle(room) {
   if (!room) {
     return;
@@ -125,6 +174,14 @@ function refreshRoomLifecycle(room) {
     }
   } else {
     room.deadSince = null;
+  }
+
+  if (isFinishedRoom(room)) {
+    if (!room.finishedAt) {
+      room.finishedAt = now();
+    }
+  } else {
+    room.finishedAt = null;
   }
 }
 
@@ -162,6 +219,7 @@ async function handleApi(req, res, url) {
       message: '0GP Race hosted API is running',
       rooms: rooms.size,
       activeRooms: activeRoomSnapshots().length,
+      finishedRooms: finishedRoomSnapshots().length,
       deadRooms: [...rooms.values()].filter(isDeadRoom).length
     });
   }
@@ -171,6 +229,14 @@ async function handleApi(req, res, url) {
       ok: true,
       message: '',
       rooms: activeRoomSnapshots()
+    });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/finished') {
+    return json(res, 200, {
+      ok: true,
+      message: '',
+      rooms: finishedRoomSnapshots()
     });
   }
 
@@ -205,6 +271,7 @@ async function handleApi(req, res, url) {
       createdAt: timestamp,
       lastActivity: timestamp,
       deadSince: null,
+      finishedAt: null,
       players: new Map()
     };
 
