@@ -101,6 +101,7 @@ public class ZeroGpRacePlugin extends Plugin
     private long multiplayerSequence;
     private long lastMultiplayerSyncAt;
     private String multiplayerPlayerName = "";
+    private long manualPauseResumeTargetGp = -1L;
     private boolean inventoryPrimed;
     private boolean bankPrimed;
     private String recentSkillSource = "";
@@ -158,6 +159,7 @@ public class ZeroGpRacePlugin extends Plugin
         panel = null;
         multiplayerPlayerName = "";
         lastMultiplayerSyncAt = 0L;
+        manualPauseResumeTargetGp = -1L;
         resetTrackingState();
     }
 
@@ -333,7 +335,14 @@ public class ZeroGpRacePlugin extends Plugin
         String raceState = panel.getMultiplayerState();
         if (panel.isRaceRunning())
         {
-            raceState = loggedIn ? "RUNNING" : "PAUSED";
+            if (panel.isManualPaused())
+            {
+                raceState = "PAUSED";
+            }
+            else
+            {
+                raceState = loggedIn ? "RUNNING" : "PAUSED";
+            }
         }
 
         long remainingMilliseconds = panel.getRemainingMilliseconds();
@@ -473,6 +482,11 @@ public class ZeroGpRacePlugin extends Plugin
     @Subscribe
     public void onGameTick(GameTick event)
     {
+        if (panel != null && panel.isManualPaused())
+        {
+            publishManualPauseValue();
+        }
+
         long now = System.currentTimeMillis();
         if (now - lastMultiplayerSyncAt < MULTIPLAYER_SYNC_INTERVAL_MS)
         {
@@ -851,6 +865,136 @@ public class ZeroGpRacePlugin extends Plugin
         SwingUtilities.invokeLater(() -> currentPanel.addNeutralTransaction(itemName, quantity, source));
     }
 
+    void onManualRacePaused(long targetGp)
+    {
+        manualPauseResumeTargetGp = Math.max(0L, targetGp);
+        clientThread.invokeLater(() ->
+        {
+            // Everything done while paused is intentionally outside the race.
+            // Clear provenance now; Resume will rebuild it from the exact-value
+            // inventory the player chooses to bring back.
+            resetTrackingState();
+            publishManualPauseValue();
+            syncMultiplayerState();
+        });
+    }
+
+    void refreshManualPauseValue()
+    {
+        clientThread.invokeLater(this::publishManualPauseValue);
+    }
+
+    void requestManualResume()
+    {
+        clientThread.invokeLater(() ->
+        {
+            if (panel == null || !panel.isRaceRunning() || !panel.isManualPaused())
+            {
+                return;
+            }
+
+            if (manualPauseResumeTargetGp < 0L)
+            {
+                return;
+            }
+
+            long inventoryValue = containerMarketValue(client.getItemContainer(InventoryID.INVENTORY));
+            long equipmentValue = containerMarketValue(client.getItemContainer(InventoryID.EQUIPMENT));
+            long targetGp = manualPauseResumeTargetGp;
+
+            if (inventoryValue != targetGp || equipmentValue > 0L)
+            {
+                ZeroGpRacePanel currentPanel = panel;
+                SwingUtilities.invokeLater(() ->
+                {
+                    if (currentPanel != null)
+                    {
+                        currentPanel.onManualResumeCheck(inventoryValue, equipmentValue);
+                    }
+                });
+                return;
+            }
+
+            /*
+             * Exact match achieved. Rebase race provenance:
+             * - the exact target inventory becomes race-owned;
+             * - the bank is snapshotted but remains outside race ownership;
+             * - anything subsequently withdrawn from the bank is imported/debited.
+             */
+            resetTrackingState();
+
+            ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
+            Map<Integer, Integer> inventorySnapshot = snapshot(inventory);
+
+            previousInventory.putAll(inventorySnapshot);
+            raceOwnedInventory.putAll(inventorySnapshot);
+            inventoryPrimed = true;
+
+            primeBank();
+            primeVisibleWorldSpawns();
+            manualPauseResumeTargetGp = -1L;
+
+            ZeroGpRacePanel currentPanel = panel;
+            SwingUtilities.invokeLater(() ->
+            {
+                if (currentPanel != null)
+                {
+                    currentPanel.completeManualResume();
+                }
+            });
+
+            // The normal 2-second sync will also pick this up; this immediate
+            // call makes the spectator status switch back quickly.
+            clientThread.invokeLater(this::syncMultiplayerState);
+        });
+    }
+
+    private void publishManualPauseValue()
+    {
+        if (panel == null || !panel.isManualPaused()
+            || client.getGameState() != GameState.LOGGED_IN)
+        {
+            return;
+        }
+
+        long inventoryValue = containerMarketValue(client.getItemContainer(InventoryID.INVENTORY));
+        long equipmentValue = containerMarketValue(client.getItemContainer(InventoryID.EQUIPMENT));
+        ZeroGpRacePanel currentPanel = panel;
+
+        SwingUtilities.invokeLater(() ->
+        {
+            if (currentPanel != null)
+            {
+                currentPanel.updateManualPauseValue(inventoryValue, equipmentValue);
+            }
+        });
+    }
+
+    private long containerMarketValue(ItemContainer container)
+    {
+        if (container == null)
+        {
+            return 0L;
+        }
+
+        long total = 0L;
+        for (Item item : container.getItems())
+        {
+            if (item.getId() <= 0 || item.getQuantity() <= 0)
+            {
+                continue;
+            }
+
+            String itemName = itemManager.getItemComposition(item.getId()).getName();
+            int unitPrice = "Coins".equalsIgnoreCase(itemName)
+                ? 1
+                : Math.max(0, itemManager.getItemPrice(item.getId()));
+
+            total += (long) unitPrice * item.getQuantity();
+        }
+        return Math.max(0L, total);
+    }
+
     void onLocalRaceStarted()
     {
         resetTrackingState();
@@ -1147,6 +1291,7 @@ public class ZeroGpRacePlugin extends Plugin
     {
         return panel != null
             && panel.isRaceRunning()
+            && !panel.isManualPaused()
             && client.getGameState() == GameState.LOGGED_IN;
     }
 

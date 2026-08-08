@@ -61,6 +61,7 @@ final class ZeroGpRacePanel extends PluginPanel
     private final JButton createRaceButton = new JButton("Create Race");
     private final JButton joinRaceButton = new JButton("Join Race");
     private final JButton dashboardButton = new JButton("Open Dashboard");
+    private final JButton pauseResumeButton = new JButton("Pause Race");
     private final JButton leaveRaceButton = new JButton("Leave Race");
     private final JButton statsButton = new JButton("Race Stats");
 
@@ -76,6 +77,11 @@ final class ZeroGpRacePanel extends PluginPanel
     private long acceptedItems;
     private long negativeBalanceDeadlineMs;
     private boolean raceRunning;
+    private boolean manualPaused;
+    private long manualPauseTargetGp;
+    private long manualPauseCurrentGp;
+    private long manualPauseEquipmentGp;
+    private boolean manualPauseValueReady;
     private boolean loggedIn;
     private String multiplayerState = "IDLE";
     private String currentPlayerName = "";
@@ -108,12 +114,14 @@ final class ZeroGpRacePanel extends PluginPanel
         prepareButton(createRaceButton, true);
         prepareButton(joinRaceButton, false);
         prepareButton(dashboardButton, false);
+        prepareButton(pauseResumeButton, false);
         prepareButton(leaveRaceButton, false);
         prepareButton(statsButton, false);
 
         createRaceButton.addActionListener(event -> showCreateRaceDialog());
         joinRaceButton.addActionListener(event -> showJoinRaceDialog());
         dashboardButton.addActionListener(event -> plugin.openDashboard(activeRoomCode));
+        pauseResumeButton.addActionListener(event -> toggleManualPause());
         leaveRaceButton.addActionListener(event -> leaveRace());
         statsButton.addActionListener(event -> showRaceStatistics());
 
@@ -122,6 +130,8 @@ final class ZeroGpRacePanel extends PluginPanel
         content.add(joinRaceButton);
         content.add(Box.createRigidArea(new Dimension(0, 7)));
         content.add(dashboardButton);
+        content.add(Box.createRigidArea(new Dimension(0, 7)));
+        content.add(pauseResumeButton);
         content.add(Box.createRigidArea(new Dimension(0, 7)));
         content.add(leaveRaceButton);
         content.add(Box.createRigidArea(new Dimension(0, 7)));
@@ -355,6 +365,11 @@ final class ZeroGpRacePanel extends PluginPanel
         gpEarned = transactionEngine.getScore();
         acceptedItems = 0L;
         raceRunning = true;
+        manualPaused = false;
+        manualPauseTargetGp = 0L;
+        manualPauseCurrentGp = 0L;
+        manualPauseEquipmentGp = 0L;
+        manualPauseValueReady = false;
         clearNegativeBalanceGrace(false);
 
         roomValue.setText(activeRoomCode);
@@ -407,12 +422,21 @@ final class ZeroGpRacePanel extends PluginPanel
         playerValue.setText(isBlank(playerName) ? "Logged in" : playerName);
         if (raceRunning)
         {
-            addLedgerEvent("LOGIN | Timer resumed");
-            multiplayerState = negativeBalanceDeadlineMs > 0L ? "OVER_BUDGET" : "RUNNING";
-            resumeTimer();
-            if (negativeBalanceDeadlineMs > 0L)
+            if (manualPaused)
             {
-                updateNegativeBalanceGrace();
+                multiplayerState = "PAUSED";
+                setStatus(manualPauseStatusText(), LIGHT_GOLD);
+                plugin.refreshManualPauseValue();
+            }
+            else
+            {
+                addLedgerEvent("LOGIN | Timer resumed");
+                multiplayerState = negativeBalanceDeadlineMs > 0L ? "OVER_BUDGET" : "RUNNING";
+                resumeTimer();
+                if (negativeBalanceDeadlineMs > 0L)
+                {
+                    updateNegativeBalanceGrace();
+                }
             }
         }
         else
@@ -425,15 +449,24 @@ final class ZeroGpRacePanel extends PluginPanel
     {
         if (raceRunning && loggedIn)
         {
-            addLedgerEvent("LOGOUT | Timer paused");
-            if (negativeBalanceDeadlineMs <= 0L)
+            if (manualPaused)
             {
                 multiplayerState = "PAUSED";
+                lastResumeAt = 0L;
+                countdownTimer.stop();
             }
-            pauseTimer();
-            if (negativeBalanceDeadlineMs > 0L)
+            else
             {
-                updateNegativeBalanceGrace();
+                addLedgerEvent("LOGOUT | Timer paused");
+                if (negativeBalanceDeadlineMs <= 0L)
+                {
+                    multiplayerState = "PAUSED";
+                }
+                pauseTimer();
+                if (negativeBalanceDeadlineMs > 0L)
+                {
+                    updateNegativeBalanceGrace();
+                }
             }
         }
         loggedIn = false;
@@ -446,7 +479,7 @@ final class ZeroGpRacePanel extends PluginPanel
 
     private void resumeTimer()
     {
-        if (!raceRunning || !loggedIn)
+        if (!raceRunning || !loggedIn || manualPaused)
         {
             return;
         }
@@ -474,7 +507,7 @@ final class ZeroGpRacePanel extends PluginPanel
 
     private void updateCountdown()
     {
-        if (!raceRunning || !loggedIn || lastResumeAt == 0L)
+        if (!raceRunning || !loggedIn || manualPaused || lastResumeAt == 0L)
         {
             return;
         }
@@ -501,6 +534,8 @@ final class ZeroGpRacePanel extends PluginPanel
 
         clearNegativeBalanceGrace(false);
         raceRunning = false;
+        manualPaused = false;
+        manualPauseTargetGp = 0L;
         lastResumeAt = 0L;
         countdownTimer.stop();
         timeValue.setText("00:00:00");
@@ -542,6 +577,10 @@ final class ZeroGpRacePanel extends PluginPanel
         gpEarned = 0L;
         acceptedItems = 0L;
         raceRunning = false;
+        manualPaused = false;
+        manualPauseTargetGp = 0L;
+        manualPauseCurrentGp = 0L;
+        manualPauseEquipmentGp = 0L;
         clearNegativeBalanceGrace(false);
         multiplayerState = "IDLE";
 
@@ -554,6 +593,201 @@ final class ZeroGpRacePanel extends PluginPanel
         playerListArea.setText("Start or join an online room.");
         multiplayerValue.setText("Local only");
         setStatus(loggedIn ? "Ready" : "Waiting for login", loggedIn ? GREEN : Color.LIGHT_GRAY);
+        updateButtonStates();
+    }
+
+    private void toggleManualPause()
+    {
+        if (!raceRunning)
+        {
+            return;
+        }
+
+        if (!manualPaused)
+        {
+            beginManualPause();
+            return;
+        }
+
+        if (!loggedIn)
+        {
+            showError("Log back in before resuming the race.");
+            return;
+        }
+
+        if (!manualPauseValueReady)
+        {
+            showError("Wait a moment for the plugin to read your current inventory value.");
+            plugin.refreshManualPauseValue();
+            return;
+        }
+
+        plugin.requestManualResume();
+    }
+
+    private void beginManualPause()
+    {
+        if (!raceRunning || manualPaused)
+        {
+            return;
+        }
+
+        if (gpEarned < 0L)
+        {
+            showError("Return to a non-negative race balance before manually pausing.");
+            return;
+        }
+
+        // Capture the exact score and timer at the instant Pause is pressed.
+        updateCountdown();
+        manualPauseTargetGp = gpEarned;
+        manualPauseCurrentGp = 0L;
+        manualPauseEquipmentGp = 0L;
+        manualPauseValueReady = false;
+        manualPaused = true;
+        lastResumeAt = 0L;
+        countdownTimer.stop();
+        clearNegativeBalanceGrace(false);
+        multiplayerState = "PAUSED";
+
+        pauseResumeButton.setText("Resume Race");
+        addLedgerEvent(String.format(
+            Locale.US,
+            "MANUAL PAUSE | Resume target %,d GP",
+            manualPauseTargetGp));
+
+        setStatus("Paused - checking resume value...", LIGHT_GOLD);
+        updateButtonStates();
+        plugin.onManualRacePaused(manualPauseTargetGp);
+    }
+
+    void updateManualPauseValue(long inventoryValue, long equipmentValue)
+    {
+        if (!manualPaused)
+        {
+            return;
+        }
+
+        manualPauseCurrentGp = Math.max(0L, inventoryValue);
+        manualPauseEquipmentGp = Math.max(0L, equipmentValue);
+        manualPauseValueReady = true;
+        setStatus(manualPauseStatusText(), LIGHT_GOLD);
+    }
+
+    private String manualPauseStatusText()
+    {
+        if (!manualPaused)
+        {
+            return "Race running";
+        }
+
+        if (!manualPauseValueReady)
+        {
+            return "Paused | Reading current inventory value...";
+        }
+
+        if (manualPauseEquipmentGp > 0L)
+        {
+            return String.format(
+                Locale.US,
+                "Paused | Deposit equipped gear: %,d GP",
+                manualPauseEquipmentGp);
+        }
+
+        long difference = manualPauseTargetGp - manualPauseCurrentGp;
+        if (difference > 0L)
+        {
+            return String.format(
+                Locale.US,
+                "Paused | Withdraw another %,d GP",
+                difference);
+        }
+
+        if (difference < 0L)
+        {
+            return String.format(
+                Locale.US,
+                "Paused | Deposit/remove %,d GP",
+                Math.abs(difference));
+        }
+
+        return String.format(
+            Locale.US,
+            "Paused | Exact %,d GP matched - ready",
+            manualPauseTargetGp);
+    }
+
+    void onManualResumeCheck(long currentInventoryValue, long equipmentValue)
+    {
+        updateManualPauseValue(currentInventoryValue, equipmentValue);
+
+        if (!manualPaused)
+        {
+            return;
+        }
+
+        if (equipmentValue > 0L)
+        {
+            JOptionPane.showMessageDialog(
+                this,
+                String.format(
+                    Locale.US,
+                    "Cannot resume yet.\\n\\n"
+                        + "Paused race value: %,d GP\\n"
+                        + "Inventory value: %,d GP\\n"
+                        + "Equipped gear value: %,d GP\\n\\n"
+                        + "Deposit the equipped gear, then match the exact paused value in your inventory.",
+                    manualPauseTargetGp,
+                    currentInventoryValue,
+                    equipmentValue),
+                "Resume Race",
+                JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        long difference = manualPauseTargetGp - currentInventoryValue;
+        if (difference != 0L)
+        {
+            String instruction = difference > 0L
+                ? String.format(Locale.US, "Withdraw another %,d GP worth of value.", difference)
+                : String.format(Locale.US, "Deposit/remove %,d GP worth of value.", Math.abs(difference));
+
+            JOptionPane.showMessageDialog(
+                this,
+                String.format(
+                    Locale.US,
+                    "Cannot resume yet.\\n\\n"
+                        + "Paused race value: %,d GP\\n"
+                        + "Current inventory value: %,d GP\\n\\n%s",
+                    manualPauseTargetGp,
+                    currentInventoryValue,
+                    instruction),
+                "Resume Race",
+                JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    void completeManualResume()
+    {
+        if (!manualPaused || !raceRunning)
+        {
+            return;
+        }
+
+        manualPaused = false;
+        manualPauseCurrentGp = manualPauseTargetGp;
+        manualPauseEquipmentGp = 0L;
+        manualPauseValueReady = false;
+        multiplayerState = "RUNNING";
+        pauseResumeButton.setText("Pause Race");
+
+        addLedgerEvent(String.format(
+            Locale.US,
+            "MANUAL RESUME | Exact %,d GP restored",
+            manualPauseTargetGp));
+
+        setStatus("Race running", GREEN);
+        resumeTimer();
         updateButtonStates();
     }
 
@@ -890,7 +1124,7 @@ final class ZeroGpRacePanel extends PluginPanel
 
     long getRemainingMilliseconds()
     {
-        if (raceRunning && loggedIn && lastResumeAt > 0L)
+        if (raceRunning && loggedIn && !manualPaused && lastResumeAt > 0L)
         {
             return Math.max(0L, remainingMilliseconds - (System.currentTimeMillis() - lastResumeAt));
         }
@@ -917,6 +1151,16 @@ final class ZeroGpRacePanel extends PluginPanel
         return raceRunning;
     }
 
+    boolean isManualPaused()
+    {
+        return manualPaused;
+    }
+
+    long getManualPauseTargetGp()
+    {
+        return manualPauseTargetGp;
+    }
+
     String getActiveRoomCode()
     {
         return activeRoomCode;
@@ -927,6 +1171,8 @@ final class ZeroGpRacePanel extends PluginPanel
         createRaceButton.setEnabled(!raceRunning);
         joinRaceButton.setEnabled(!raceRunning);
         dashboardButton.setEnabled(!activeRoomCode.isEmpty());
+        pauseResumeButton.setEnabled(raceRunning && loggedIn);
+        pauseResumeButton.setText(manualPaused ? "Resume Race" : "Pause Race");
         leaveRaceButton.setEnabled(raceRunning || !activeRoomCode.isEmpty());
         statsButton.setEnabled(raceRunning || !activeRoomCode.isEmpty() || !transactionEngine.getTransactions().isEmpty());
     }
