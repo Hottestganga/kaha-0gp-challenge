@@ -6,6 +6,7 @@ const { URL } = require('url');
 const PORT = Number(process.env.PORT || 8787);
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 24 * 60 * 60 * 1000);
 const PLAYER_STALE_MS = Number(process.env.PLAYER_STALE_MS || 5 * 60 * 1000);
+const DEAD_ROOM_GRACE_MS = Number(process.env.DEAD_ROOM_GRACE_MS || 10 * 60 * 1000);
 const rooms = new Map();
 
 function now() { return Date.now(); }
@@ -63,18 +64,19 @@ function snapshot(room) {
     startingAllowance: room.startingAllowance,
     createdAt: room.createdAt,
     lastActivity: room.lastActivity,
+    deadSince: room.deadSince || null,
     players
   };
 }
 
 function isActiveRoom(room) {
-  if (!room || room.players.size === 0) {
+  if (!room || isDeadRoom(room)) {
     return false;
   }
 
   return [...room.players.values()].some(player => {
-    const state = cleanName(player.raceState, 'RUNNING').toUpperCase();
-    return state !== 'FINISHED' && state !== 'DISQUALIFIED';
+    const state = normalizedRaceState(player);
+    return state !== 'FINISHED' && state !== 'DQ' && state !== 'DISQUALIFIED';
   });
 }
 
@@ -83,6 +85,47 @@ function activeRoomSnapshots() {
     .filter(isActiveRoom)
     .sort((a, b) => b.lastActivity - a.lastActivity)
     .map(snapshot);
+}
+
+function normalizedRaceState(player) {
+  return cleanName(player && player.raceState, '').toUpperCase();
+}
+
+function isDisqualifiedState(player) {
+  const state = normalizedRaceState(player);
+  return state === 'DQ' || state === 'DISQUALIFIED';
+}
+
+function allPlayersDisqualified(room) {
+  if (!room || room.players.size === 0) {
+    return false;
+  }
+
+  return [...room.players.values()].every(isDisqualifiedState);
+}
+
+function isDeadRoom(room) {
+  if (!room) {
+    return true;
+  }
+
+  // Empty rooms are abandoned. Rooms where every remaining participant is DQ'd
+  // are also considered dead. Finished races are deliberately NOT dead.
+  return room.players.size === 0 || allPlayersDisqualified(room);
+}
+
+function refreshRoomLifecycle(room) {
+  if (!room) {
+    return;
+  }
+
+  if (isDeadRoom(room)) {
+    if (!room.deadSince) {
+      room.deadSince = now();
+    }
+  } else {
+    room.deadSince = null;
+  }
 }
 
 function readJson(req) {
@@ -118,7 +161,8 @@ async function handleApi(req, res, url) {
       ok: true,
       message: '0GP Race hosted API is running',
       rooms: rooms.size,
-      activeRooms: activeRoomSnapshots().length
+      activeRooms: activeRoomSnapshots().length,
+      deadRooms: [...rooms.values()].filter(isDeadRoom).length
     });
   }
 
@@ -160,6 +204,7 @@ async function handleApi(req, res, url) {
       startingAllowance: clampLong(body.startingAllowance),
       createdAt: timestamp,
       lastActivity: timestamp,
+      deadSince: null,
       players: new Map()
     };
 
@@ -198,6 +243,7 @@ async function handleApi(req, res, url) {
       });
     }
 
+    refreshRoomLifecycle(room);
     return ok(res, room);
   }
 
@@ -259,6 +305,7 @@ async function handleApi(req, res, url) {
     });
 
     touch(room);
+    refreshRoomLifecycle(room);
     return ok(res, room);
   }
 
@@ -270,6 +317,7 @@ async function handleApi(req, res, url) {
 
     room.players.delete(pkey(player));
     touch(room);
+    refreshRoomLifecycle(room);
     return ok(res, room);
   }
 
@@ -277,20 +325,37 @@ async function handleApi(req, res, url) {
 }
 
 function cleanup() {
-  const cutoff = now() - ROOM_TTL_MS;
+  const timestamp = now();
+  const cutoff = timestamp - ROOM_TTL_MS;
 
   for (const [code, room] of rooms) {
-    if (room.lastActivity < cutoff) {
-      rooms.delete(code);
-      continue;
-    }
-
-    const stale = now() - PLAYER_STALE_MS;
+    // First update stale RUNNING players to PAUSED. A stale player is still a
+    // legitimate participant, so this does not make the room "dead".
+    const stale = timestamp - PLAYER_STALE_MS;
     for (const player of room.players.values()) {
       if (player.lastSeen < stale && player.raceState === 'RUNNING') {
         player.loggedIn = false;
         player.raceState = 'PAUSED';
       }
+    }
+
+    refreshRoomLifecycle(room);
+
+    // Empty rooms and all-DQ rooms disappear from Active Races immediately,
+    // but remain addressable for a short grace period in case of a transient
+    // leave/rejoin or debugging need.
+    if (room.deadSince) {
+      if (timestamp - room.deadSince >= DEAD_ROOM_GRACE_MS) {
+        rooms.delete(code);
+      }
+      continue;
+    }
+
+    // Legitimate finished races are NOT treated as dead. They can remain
+    // addressable for the normal room TTL (currently 24 hours) and can later
+    // be moved into a persistent archive without changing this rule.
+    if (room.lastActivity < cutoff) {
+      rooms.delete(code);
     }
   }
 }
