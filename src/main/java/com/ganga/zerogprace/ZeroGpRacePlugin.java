@@ -19,7 +19,6 @@ import java.util.Iterator;
 import java.util.Map;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
-import javax.swing.Timer;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.InventoryID;
@@ -27,13 +26,16 @@ import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
 import net.runelite.api.Scene;
+import net.runelite.api.Skill;
 import net.runelite.api.Tile;
 import net.runelite.api.TileItem;
 import net.runelite.api.WorldView;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.ItemSpawned;
 import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.events.StatChanged;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
@@ -69,7 +71,10 @@ public class ZeroGpRacePlugin extends Plugin
     private static final long DROP_LIFETIME_MS = 300_000L;
     private static final long TAKE_CLICK_LIFETIME_MS = 12_000L;
     private static final long DIRECT_GAIN_LIFETIME_MS = 2_000L;
+    private static final long REWARD_GAIN_LIFETIME_MS = 12_000L;
+    private static final long SKILL_GAIN_LIFETIME_MS = 3_000L;
     private static final long RACE_ITEM_OPEN_LIFETIME_MS = 3_000L;
+    private static final long MULTIPLAYER_SYNC_INTERVAL_MS = 2_000L;
 
     @Inject private Client client;
     @Inject private ClientThread clientThread;
@@ -93,10 +98,13 @@ public class ZeroGpRacePlugin extends Plugin
     private ZeroGpRacePanel panel;
     private NavigationButton navigationButton;
     private MultiplayerClient multiplayerClient;
-    private Timer multiplayerSyncTimer;
     private long multiplayerSequence;
+    private long lastMultiplayerSyncAt;
+    private String multiplayerPlayerName = "";
     private boolean inventoryPrimed;
     private boolean bankPrimed;
+    private String recentSkillSource = "";
+    private long recentSkillSourceExpiresAt;
 
     @Provides
     ZeroGpRaceConfig provideConfig(ConfigManager manager)
@@ -119,8 +127,7 @@ public class ZeroGpRacePlugin extends Plugin
         clientToolbar.addNavigation(navigationButton);
 
         multiplayerClient = new MultiplayerClient(httpClient, gson);
-        multiplayerSyncTimer = new Timer(2000, event -> syncMultiplayerState());
-        multiplayerSyncTimer.start();
+        lastMultiplayerSyncAt = 0L;
         panel.setMultiplayerStatus(config.multiplayerEnabled() ? "Ready" : "Local only");
 
         if (client.getGameState() == GameState.LOGGED_IN)
@@ -137,11 +144,6 @@ public class ZeroGpRacePlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        if (multiplayerSyncTimer != null)
-        {
-            multiplayerSyncTimer.stop();
-            multiplayerSyncTimer = null;
-        }
         if (multiplayerClient != null)
         {
             multiplayerClient.reset();
@@ -154,6 +156,8 @@ public class ZeroGpRacePlugin extends Plugin
             navigationButton = null;
         }
         panel = null;
+        multiplayerPlayerName = "";
+        lastMultiplayerSyncAt = 0L;
         resetTrackingState();
     }
 
@@ -179,6 +183,7 @@ public class ZeroGpRacePlugin extends Plugin
             return;
         }
 
+        multiplayerPlayerName = player;
         panel.setMultiplayerStatus("Creating...");
         CreateRoomRequest request = new CreateRoomRequest(
             roomCode, raceName, durationMilliseconds, startingAllowance, player,
@@ -234,6 +239,8 @@ public class ZeroGpRacePlugin extends Plugin
             return;
         }
 
+        multiplayerPlayerName = player;
+
         multiplayerClient.joinRoom(apiBase, new JoinRoomRequest(normaliseRoom(roomCode), player),
             new MultiplayerClient.ResultCallback()
             {
@@ -266,7 +273,7 @@ public class ZeroGpRacePlugin extends Plugin
     void leaveMultiplayerRoom(String roomCode)
     {
         String apiBase = multiplayerApiBase();
-        String player = currentPlayerName();
+        String player = multiplayerPlayerName.isEmpty() ? currentPlayerName() : multiplayerPlayerName;
         String room = normaliseRoom(roomCode);
         if (!config.multiplayerEnabled() || apiBase == null || player.isEmpty()
             || room.isEmpty() || multiplayerClient == null)
@@ -298,16 +305,58 @@ public class ZeroGpRacePlugin extends Plugin
         }
 
         String room = normaliseRoom(panel.getActiveRoomCode());
-        String player = panel.getCurrentPlayerName();
+        String player = multiplayerPlayerName;
+
+        if (player.isEmpty())
+        {
+            player = panel.getCurrentPlayerName();
+        }
+
+        if (player.isEmpty())
+        {
+            player = currentPlayerName();
+        }
+
         String apiBase = multiplayerApiBase();
+
         if (room.isEmpty() || player.isEmpty() || apiBase == null)
         {
             return;
         }
 
+        // Keep a player name even after RuneLite clears client.getLocalPlayer() on logout.
+        multiplayerPlayerName = player;
+
+        // RuneLite GameState is the source of truth for online/paused state.
+        boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
+
+        String raceState = panel.getMultiplayerState();
+        if (panel.isRaceRunning())
+        {
+            raceState = loggedIn ? "RUNNING" : "PAUSED";
+        }
+
+        long remainingMilliseconds = panel.getRemainingMilliseconds();
+
+        log.info(
+            "0GP SYNC | room={} | player={} | gameState={} | loggedIn={} | raceState={} | remainingMs={}",
+            room,
+            player,
+            client.getGameState(),
+            loggedIn,
+            raceState,
+            remainingMilliseconds
+        );
+
         RaceSyncPayload payload = new RaceSyncPayload(
-            room, player, panel.getScore(), panel.getRemainingMilliseconds(),
-            panel.isLoggedInForSync(), panel.getMultiplayerState(), ++multiplayerSequence);
+            room,
+            player,
+            panel.getScore(),
+            remainingMilliseconds,
+            loggedIn,
+            raceState,
+            ++multiplayerSequence
+        );
 
         multiplayerClient.sync(apiBase, payload, new MultiplayerClient.ResultCallback()
         {
@@ -374,7 +423,23 @@ public class ZeroGpRacePlugin extends Plugin
 
         if (event.getGameState() == GameState.LOGGED_IN)
         {
-            SwingUtilities.invokeLater(() -> panel.onLoggedIn(currentPlayerName()));
+            String playerName = currentPlayerName();
+            if (!playerName.isEmpty())
+            {
+                multiplayerPlayerName = playerName;
+            }
+
+            // Push RUNNING immediately using RuneLite's real game state.
+            syncMultiplayerState();
+
+            SwingUtilities.invokeLater(() ->
+            {
+                if (panel != null)
+                {
+                    panel.onLoggedIn(playerName);
+                }
+            });
+
             primeInventory();
             return;
         }
@@ -387,10 +452,49 @@ public class ZeroGpRacePlugin extends Plugin
             case HOPPING:
                 previousInventory.clear();
                 inventoryPrimed = false;
-                SwingUtilities.invokeLater(panel::onLoggedOut);
+
+                // Push PAUSED immediately, before client.getLocalPlayer() disappears.
+                syncMultiplayerState();
+
+                SwingUtilities.invokeLater(() ->
+                {
+                    if (panel != null)
+                    {
+                        panel.onLoggedOut();
+                    }
+                });
                 break;
+
             default:
                 break;
+        }
+    }
+
+    @Subscribe
+    public void onGameTick(GameTick event)
+    {
+        long now = System.currentTimeMillis();
+        if (now - lastMultiplayerSyncAt < MULTIPLAYER_SYNC_INTERVAL_MS)
+        {
+            return;
+        }
+
+        lastMultiplayerSyncAt = now;
+        syncMultiplayerState();
+    }
+
+    @Subscribe
+    public void onStatChanged(StatChanged event)
+    {
+        if (!canTrackLoot() || event == null)
+        {
+            return;
+        }
+
+        String source = skillSource(event.getSkill());
+        if (source != null)
+        {
+            armSkillSource(source);
         }
     }
 
@@ -443,19 +547,45 @@ public class ZeroGpRacePlugin extends Plugin
         }
 
         String option = event.getMenuOption();
+        String target = stripTags(event.getMenuTarget());
+
+        // Explicitly exclude stored-point / pre-stackable reward systems.
+        if (isExcludedStoredRewardInteraction(option, target))
+        {
+            return;
+        }
+
+        // Keyed chests only count when the key itself was earned during the race.
+        DirectGainSource keyedReward = classifyKeyedRewardInteraction(option, target);
+        if (keyedReward != null)
+        {
+            directGainSources.addLast(keyedReward);
+            purgeExpired();
+            return;
+        }
+
+        // Raids, Gauntlet, Barrows and other immediate reward chests.
+        String rewardSource = classifyRewardInteraction(option, target, event.getMenuAction());
+        if (rewardSource != null)
+        {
+            directGainSources.addLast(new DirectGainSource(
+                rewardSource,
+                -1,
+                System.currentTimeMillis() + REWARD_GAIN_LIFETIME_MS));
+            purgeExpired();
+            return;
+        }
+
         if ("Pickpocket".equalsIgnoreCase(option))
         {
             directGainSources.addLast(new DirectGainSource(
-                "PICKPOCKET",
+                "THIEVING",
                 -1,
                 System.currentTimeMillis() + DIRECT_GAIN_LIFETIME_MS));
             purgeExpired();
             return;
         }
 
-        // Stalls and thieving chests often place rewards directly into the
-        // inventory instead of creating a ground item. Arm a short provenance
-        // window only for game-object actions commonly used by those sources.
         if (isThievingObjectAction(option, event.getMenuAction()))
         {
             directGainSources.addLast(new DirectGainSource(
@@ -466,21 +596,43 @@ public class ZeroGpRacePlugin extends Plugin
             return;
         }
 
-        // If a race-owned reward/container item is opened, looted, searched,
-        // claimed, etc., any inventory gains that immediately follow inherit
-        // race ownership. This covers pickpocket coin pouches and gives us a
-        // generic foundation for caskets, impling jars and similar containers.
+        // Menu-backed skilling provenance catches the first product even when
+        // RuneLite's StatChanged event arrives after the inventory update.
+        String skillSource = classifySkillInteraction(option, target);
+        if (skillSource != null)
+        {
+            armSkillSource(skillSource);
+
+            // Use a direct source too so a single click that immediately creates
+            // an item is accepted before the XP event arrives.
+            directGainSources.addLast(new DirectGainSource(
+                skillSource,
+                -1,
+                System.currentTimeMillis() + SKILL_GAIN_LIFETIME_MS));
+            purgeExpired();
+        }
+
+        // A race-earned clue casket / impling jar / container passes provenance
+        // into the contents. Pre-race containers do not count.
         if (isRaceOwnedContainerAction(option))
         {
             int itemId = event.getItemId();
             if (itemId > 0 && raceOwnedInventory.getOrDefault(itemId, 0) > 0)
             {
-                directGainSources.addLast(new DirectGainSource(
-                    "RACE ITEM",
-                    itemId,
-                    System.currentTimeMillis() + RACE_ITEM_OPEN_LIFETIME_MS));
-                purgeExpired();
-                return;
+                String itemName = itemManager.getItemComposition(itemId).getName();
+                if (!isExcludedStoredRewardItem(itemName))
+                {
+                    String source = itemName.toLowerCase().contains("casket")
+                        ? "CLUE REWARD"
+                        : "RACE ITEM";
+
+                    directGainSources.addLast(new DirectGainSource(
+                        source,
+                        itemId,
+                        System.currentTimeMillis() + RACE_ITEM_OPEN_LIFETIME_MS));
+                    purgeExpired();
+                    return;
+                }
             }
         }
 
@@ -538,12 +690,27 @@ public class ZeroGpRacePlugin extends Plugin
         }
 
         purgeExpired();
+
         DirectGainSource directGain = activeDirectGainSource();
         String directSource = directGain == null ? null : directGain.source;
+        String skillSource = activeSkillSource();
 
-        // If the player just opened a race-owned container/reward item, consume
-        // the matching race-owned quantity from the inventory ledger when it
-        // actually disappears. The contents can then inherit race ownership.
+        // Direct interaction provenance wins; otherwise use the recent XP skill.
+        String earningSource = directSource != null ? directSource : skillSource;
+
+        /*
+         * Production skills transform existing value (e.g. logs -> bows,
+         * essence -> runes, herbs -> potions). Remove the value of race-owned
+         * inputs as they are consumed, then credit the finished output. That
+         * makes score change equal to the real value added instead of counting
+         * both the input and output.
+         */
+        if (earningSource != null && isProcessingSkillSource(earningSource))
+        {
+            consumeProcessingInputs(current, earningSource);
+        }
+
+        // Containers / keyed rewards consume a race-owned source item.
         if (directGain != null && directGain.sourceItemId > 0)
         {
             int lost = previousInventory.getOrDefault(directGain.sourceItemId, 0)
@@ -552,10 +719,14 @@ public class ZeroGpRacePlugin extends Plugin
             {
                 int owned = raceOwnedInventory.getOrDefault(directGain.sourceItemId, 0);
                 changeQuantity(raceOwnedInventory, directGain.sourceItemId, -Math.min(lost, owned));
+
+                int imported = importedOutstanding.getOrDefault(directGain.sourceItemId, 0);
+                changeQuantity(importedOutstanding, directGain.sourceItemId, -Math.min(lost, imported));
             }
         }
 
         boolean usedDirectSource = false;
+
         for (Map.Entry<Integer, Integer> entry : current.entrySet())
         {
             int itemId = entry.getKey();
@@ -567,6 +738,7 @@ public class ZeroGpRacePlugin extends Plugin
 
             int remainingGain = gained;
 
+            // NPC/PvP/world-spawn provenance.
             if (consumeTakeClick(itemId))
             {
                 AcceptedLoot accepted = consumeEligibleDrop(itemId, remainingGain);
@@ -577,20 +749,25 @@ public class ZeroGpRacePlugin extends Plugin
                 }
             }
 
-            if (remainingGain > 0 && directSource != null)
+            // Reward chest / skilling / clue / container provenance.
+            if (remainingGain > 0 && earningSource != null)
             {
-                acceptPickup(itemId, remainingGain, directSource);
-                usedDirectSource = true;
+                acceptPickup(itemId, remainingGain, earningSource);
+                usedDirectSource = directSource != null;
             }
         }
 
-        // A container can disappear in one inventory update and add its
-        // contents in the next. Keep the source context alive until it is
-        // actually used by a positive inventory gain.
         if (directSource != null && usedDirectSource)
         {
             consumeDirectGainSource(directSource);
         }
+
+        /*
+         * Clue completion frequently replaces a race-earned clue scroll with a
+         * casket in the same inventory update without a useful menu event.
+         * Detect that inheritance directly.
+         */
+        inheritClueCasketIfPresent(current);
 
         previousInventory.clear();
         previousInventory.putAll(current);
@@ -1058,6 +1235,473 @@ public class ZeroGpRacePlugin extends Plugin
         }
     }
 
+    /**
+     * Returns a race earning source for reward-style interactions, or null if
+     * the click is not a reward collection action.
+     *
+     * This intentionally keys off both the action and target name so normal
+     * doors/bank chests do not become earning sources.
+     */
+    private void armSkillSource(String source)
+    {
+        if (source == null || source.trim().isEmpty())
+        {
+            return;
+        }
+
+        recentSkillSource = source;
+        recentSkillSourceExpiresAt = System.currentTimeMillis() + SKILL_GAIN_LIFETIME_MS;
+    }
+
+    private String activeSkillSource()
+    {
+        if (recentSkillSourceExpiresAt < System.currentTimeMillis())
+        {
+            recentSkillSource = "";
+            recentSkillSourceExpiresAt = 0L;
+            return null;
+        }
+
+        return recentSkillSource.isEmpty() ? null : recentSkillSource;
+    }
+
+    private static String skillSource(Skill skill)
+    {
+        if (skill == null)
+        {
+            return null;
+        }
+
+        switch (skill)
+        {
+            case MINING:
+                return "MINING";
+            case WOODCUTTING:
+                return "WOODCUTTING";
+            case FISHING:
+                return "FISHING";
+            case HUNTER:
+                return "HUNTER";
+            case FARMING:
+                return "FARMING";
+            case RUNECRAFT:
+                return "RUNECRAFTING";
+            case AGILITY:
+                return "AGILITY";
+            case THIEVING:
+                return "THIEVING";
+            case HERBLORE:
+                return "HERBLORE";
+            case CRAFTING:
+                return "CRAFTING";
+            case FLETCHING:
+                return "FLETCHING";
+            case SMITHING:
+                return "SMITHING";
+            case COOKING:
+                return "COOKING";
+            case FIREMAKING:
+                return "FIREMAKING";
+            case CONSTRUCTION:
+                return "CONSTRUCTION";
+            default:
+                return null;
+        }
+    }
+
+    private static String classifySkillInteraction(String option, String target)
+    {
+        if (option == null)
+        {
+            return null;
+        }
+
+        String o = option.trim().toLowerCase();
+        String t = target == null ? "" : target.trim().toLowerCase();
+
+        if (o.equals("mine"))
+        {
+            return "MINING";
+        }
+
+        if (o.equals("chop down") || o.equals("chop"))
+        {
+            return "WOODCUTTING";
+        }
+
+        if (o.equals("net") || o.equals("bait") || o.equals("lure")
+            || o.equals("cage") || o.equals("harpoon") || o.equals("fish")
+            || o.equals("big net") || o.equals("small net"))
+        {
+            return "FISHING";
+        }
+
+        if (o.equals("harvest") || o.equals("pick-herbs") || o.equals("pick herbs")
+            || (o.equals("pick") && (t.contains("patch") || t.contains("herb")
+                || t.contains("allotment") || t.contains("bush") || t.contains("fruit"))))
+        {
+            return "FARMING";
+        }
+
+        if (o.contains("craft-rune") || o.contains("craft rune"))
+        {
+            return "RUNECRAFTING";
+        }
+
+        if (o.equals("check") && (t.contains("trap") || t.contains("bird")
+            || t.contains("box") || t.contains("net")))
+        {
+            return "HUNTER";
+        }
+
+        // Production actions. StatChanged normally replaces this generic label
+        // with the exact skill, but this catches the first inventory update.
+        if (o.equals("make") || o.equals("make-all") || o.equals("make all")
+            || o.equals("craft") || o.equals("fletch") || o.equals("cook")
+            || o.equals("smelt") || o.equals("smith") || o.equals("mix")
+            || o.equals("clean") || o.equals("grind") || o.equals("spin")
+            || o.equals("tan") || o.equals("cut"))
+        {
+            return "SKILLING";
+        }
+
+        return null;
+    }
+
+    private static boolean isProcessingSkillSource(String source)
+    {
+        if (source == null)
+        {
+            return false;
+        }
+
+        switch (source.toUpperCase())
+        {
+            case "SKILLING":
+            case "RUNECRAFTING":
+            case "HERBLORE":
+            case "CRAFTING":
+            case "FLETCHING":
+            case "SMITHING":
+            case "COOKING":
+            case "FIREMAKING":
+            case "CONSTRUCTION":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void consumeProcessingInputs(Map<Integer, Integer> current, String source)
+    {
+        for (Map.Entry<Integer, Integer> entry : previousInventory.entrySet())
+        {
+            int itemId = entry.getKey();
+            int lost = entry.getValue() - current.getOrDefault(itemId, 0);
+            if (lost <= 0)
+            {
+                continue;
+            }
+
+            int remainingLost = lost;
+
+            // Race-earned inputs were already counted positively, so subtract
+            // their market value when they are consumed.
+            int raceOwned = Math.min(
+                remainingLost,
+                raceOwnedInventory.getOrDefault(itemId, 0));
+
+            if (raceOwned > 0)
+            {
+                changeQuantity(raceOwnedInventory, itemId, -raceOwned);
+                removeRaceOwnedValue(itemId, raceOwned, source + " INPUT");
+                remainingLost -= raceOwned;
+            }
+
+            // Imported inputs were already debited when they entered the race.
+            // Remove only their outstanding quantity; do not debit them twice.
+            if (remainingLost > 0)
+            {
+                int imported = Math.min(
+                    remainingLost,
+                    importedOutstanding.getOrDefault(itemId, 0));
+
+                if (imported > 0)
+                {
+                    changeQuantity(importedOutstanding, itemId, -imported);
+                }
+            }
+        }
+    }
+
+    private void removeRaceOwnedValue(int itemId, int quantity, String source)
+    {
+        if (quantity <= 0 || panel == null)
+        {
+            return;
+        }
+
+        int unitPrice = Math.max(0, itemManager.getItemPrice(itemId));
+        long value = (long) unitPrice * quantity;
+        if (value <= 0L)
+        {
+            return;
+        }
+
+        String itemName = itemManager.getItemComposition(itemId).getName();
+        ZeroGpRacePanel currentPanel = panel;
+
+        SwingUtilities.invokeLater(() ->
+            currentPanel.addRaceOwnedConsumption(itemName, quantity, value, source));
+    }
+
+    private void inheritClueCasketIfPresent(Map<Integer, Integer> current)
+    {
+        int lostClueId = -1;
+
+        for (Map.Entry<Integer, Integer> entry : previousInventory.entrySet())
+        {
+            int itemId = entry.getKey();
+            int lost = entry.getValue() - current.getOrDefault(itemId, 0);
+            if (lost <= 0 || raceOwnedInventory.getOrDefault(itemId, 0) <= 0)
+            {
+                continue;
+            }
+
+            String name = itemManager.getItemComposition(itemId).getName().toLowerCase();
+            if (name.contains("clue scroll"))
+            {
+                lostClueId = itemId;
+                break;
+            }
+        }
+
+        if (lostClueId <= 0)
+        {
+            return;
+        }
+
+        for (Map.Entry<Integer, Integer> entry : current.entrySet())
+        {
+            int itemId = entry.getKey();
+            int gained = entry.getValue() - previousInventory.getOrDefault(itemId, 0);
+            if (gained <= 0)
+            {
+                continue;
+            }
+
+            String name = itemManager.getItemComposition(itemId).getName().toLowerCase();
+            if (name.contains("casket"))
+            {
+                changeQuantity(raceOwnedInventory, lostClueId, -1);
+                acceptPickup(itemId, gained, "CLUE REWARD");
+                return;
+            }
+        }
+    }
+
+    private DirectGainSource classifyKeyedRewardInteraction(String option, String target)
+    {
+        if (option == null || target == null)
+        {
+            return null;
+        }
+
+        String o = option.trim().toLowerCase();
+        String t = target.trim().toLowerCase();
+
+        if (!(o.equals("open") || o.equals("unlock") || o.equals("use")))
+        {
+            return null;
+        }
+
+        if (t.contains("brimstone chest"))
+        {
+            int keyId = findRaceOwnedItemByName("brimstone key");
+            return keyId > 0
+                ? new DirectGainSource("BRIMSTONE CHEST", keyId,
+                    System.currentTimeMillis() + REWARD_GAIN_LIFETIME_MS)
+                : null;
+        }
+
+        if (t.contains("larran"))
+        {
+            int keyId = findRaceOwnedItemByName("larran's key");
+            return keyId > 0
+                ? new DirectGainSource("LARRAN'S CHEST", keyId,
+                    System.currentTimeMillis() + REWARD_GAIN_LIFETIME_MS)
+                : null;
+        }
+
+        if (t.contains("crystal chest"))
+        {
+            int keyId = findRaceOwnedItemByName("crystal key");
+            return keyId > 0
+                ? new DirectGainSource("CRYSTAL CHEST", keyId,
+                    System.currentTimeMillis() + REWARD_GAIN_LIFETIME_MS)
+                : null;
+        }
+
+        return null;
+    }
+
+    private int findRaceOwnedItemByName(String wantedName)
+    {
+        String wanted = wantedName == null ? "" : wantedName.trim().toLowerCase();
+        if (wanted.isEmpty())
+        {
+            return -1;
+        }
+
+        for (Map.Entry<Integer, Integer> entry : raceOwnedInventory.entrySet())
+        {
+            if (entry.getValue() <= 0)
+            {
+                continue;
+            }
+
+            String name = itemManager.getItemComposition(entry.getKey()).getName();
+            if (name != null && name.trim().toLowerCase().equals(wanted))
+            {
+                return entry.getKey();
+            }
+        }
+
+        return -1;
+    }
+
+    private static boolean isExcludedStoredRewardInteraction(String option, String target)
+    {
+        String t = target == null ? "" : target.trim().toLowerCase();
+
+        return t.contains("reward pool")
+            || t.contains("rewards guardian")
+            || t.contains("reward guardian")
+            || t.contains("hallowed coffin")
+            || t.contains("hallowed sepulchre")
+            || t.contains("pest control")
+            || t.contains("soul wars")
+            || t.contains("last man standing")
+            || t.contains("lms");
+    }
+
+    private static boolean isExcludedStoredRewardItem(String itemName)
+    {
+        if (itemName == null)
+        {
+            return false;
+        }
+
+        String name = itemName.trim().toLowerCase();
+
+        // Wintertodt crates are intentionally excluded by race rule.
+        return name.equals("supply crate");
+    }
+
+    private static String classifyRewardInteraction(String option, String target, MenuAction action)
+    {
+        if (option == null)
+        {
+            return null;
+        }
+
+        String normalisedOption = option.trim().toLowerCase();
+        String normalisedTarget = target == null ? "" : target.trim().toLowerCase();
+
+        if (isExcludedStoredRewardInteraction(option, target))
+        {
+            return null;
+        }
+
+        // Never arm provenance from banking/storage furniture.
+        if (normalisedTarget.contains("bank")
+            || normalisedTarget.contains("deposit box")
+            || normalisedTarget.contains("group storage")
+            || normalisedTarget.contains("seed vault"))
+        {
+            return null;
+        }
+
+        boolean rewardAction =
+            normalisedOption.equals("open")
+            || normalisedOption.equals("search")
+            || normalisedOption.equals("loot")
+            || normalisedOption.equals("claim")
+            || normalisedOption.equals("collect")
+            || normalisedOption.equals("collect-reward")
+            || normalisedOption.equals("collect reward")
+            || normalisedOption.equals("take-reward")
+            || normalisedOption.equals("take reward")
+            || normalisedOption.equals("receive")
+            || normalisedOption.equals("rewards");
+
+        if (!rewardAction)
+        {
+            return null;
+        }
+
+        // Specific raid / activity labels first.
+        if (normalisedTarget.contains("ancient chest"))
+        {
+            return "CHAMBERS OF XERIC";
+        }
+
+        if (normalisedTarget.contains("monumental chest"))
+        {
+            return "THEATRE OF BLOOD";
+        }
+
+        if (normalisedTarget.contains("grand chest"))
+        {
+            return "TOMBS OF AMASCUT";
+        }
+
+        if (normalisedTarget.contains("reward chest"))
+        {
+            return "GAUNTLET";
+        }
+
+        if (normalisedTarget.contains("barrows") || normalisedTarget.equals("chest"))
+        {
+            return "REWARD CHEST";
+        }
+
+        // Generic reward wording used by many minigames and bosses.
+        if (normalisedTarget.contains("reward")
+            || normalisedTarget.contains("treasure")
+            || normalisedTarget.contains("coffer")
+            || normalisedTarget.contains("cache")
+            || normalisedTarget.contains("crate")
+            || normalisedTarget.contains("chest"))
+        {
+            return "REWARD CHEST";
+        }
+
+        // Some reward objects have sparse target text. Restrict this fallback to
+        // actual game-object interactions to avoid tagging ordinary menu actions.
+        if (isGameObjectAction(action)
+            && (normalisedOption.equals("claim")
+                || normalisedOption.equals("collect-reward")
+                || normalisedOption.equals("collect reward")
+                || normalisedOption.equals("take-reward")
+                || normalisedOption.equals("take reward")))
+        {
+            return "ACTIVITY REWARD";
+        }
+
+        return null;
+    }
+
+    private static String stripTags(String value)
+    {
+        if (value == null || value.isEmpty())
+        {
+            return "";
+        }
+
+        return value.replaceAll("<[^>]*>", "").trim();
+    }
+
     private static boolean isThievingObjectAction(String option, MenuAction action)
     {
         if (option == null || !isGameObjectAction(action))
@@ -1127,6 +1771,8 @@ public class ZeroGpRacePlugin extends Plugin
         directGainSources.clear();
         inventoryPrimed = false;
         bankPrimed = false;
+        recentSkillSource = "";
+        recentSkillSourceExpiresAt = 0L;
     }
 
     private static String cleanHttpsBase(String value)

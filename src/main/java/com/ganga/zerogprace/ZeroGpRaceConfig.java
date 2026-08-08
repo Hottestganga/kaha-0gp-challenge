@@ -31,7 +31,7 @@ public interface ZeroGpRaceConfig extends Config
     )
     default String apiUrl()
     {
-        return "http://127.0.0.1:8787";
+        return "https://kaha-0gp-challenge.onrender.com";
     }
 
     @ConfigItem(

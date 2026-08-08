@@ -579,6 +579,39 @@ final class ZeroGpRacePanel extends PluginPanel
         applyScoreChange(itemName, quantity, -Math.abs(value), source);
     }
 
+    void addRaceOwnedConsumption(String itemName, int quantity, long value, String source)
+    {
+        if (!raceRunning || quantity <= 0 || value <= 0L)
+        {
+            return;
+        }
+
+        long signedValue = -Math.abs(value);
+        RaceSource raceSource = RaceSource.fromLabel(source);
+
+        transactionEngine.record(new RaceTransaction(
+            System.currentTimeMillis(), raceSource, itemName, quantity, Math.abs(signedValue), signedValue,
+            OwnershipType.RACE_OWNED, TransactionStatus.ACCEPTED, source));
+
+        gpEarned = transactionEngine.getScore();
+        gpValue.setText(String.format(Locale.US, "%,d GP", gpEarned));
+        gpValue.setForeground(gpEarned < 0L ? RED : Color.WHITE);
+
+        addLedgerEvent(String.format(
+            Locale.US,
+            "%s x%d  -%,d GP [%s]",
+            itemName, quantity, Math.abs(signedValue), source));
+
+        if (gpEarned < 0L)
+        {
+            startNegativeBalanceGraceIfNeeded();
+        }
+        else
+        {
+            clearNegativeBalanceGrace(true);
+        }
+    }
+
     void addImportedRefund(String itemName, int quantity, long value, String source)
     {
         if (!raceRunning || quantity <= 0 || value <= 0L)
