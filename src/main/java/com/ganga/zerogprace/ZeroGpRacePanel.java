@@ -53,14 +53,25 @@ final class ZeroGpRacePanel extends PluginPanel
     private final JLabel playerValue = valueLabel("Not logged in");
     private final JLabel timeValue = valueLabel("--:--:--");
     private final JLabel gpValue = valueLabel("0 GP");
+    private final JLabel bankValue = valueLabel("0 GP");
     private final JLabel acceptedValue = valueLabel("0");
     private final JLabel multiplayerValue = valueLabel("Local only");
+
+    // Dedicated pause/resume guidance so the wealth difference is never
+    // hidden by the narrow one-line Status field.
+    private final JPanel pauseGuidePanel = new JPanel(new GridLayout(4, 2, 6, 6));
+    private final JLabel pauseRequiredValue = valueLabel("0 GP");
+    private final JLabel pauseCurrentValue = valueLabel("0 GP");
+    private final JLabel pauseDifferenceValue = valueLabel("--");
+    private final JLabel pauseReadyValue = valueLabel("Waiting");
+
     private final JTextArea playerListArea = new JTextArea(5, 20);
     private final JTextArea recentLootArea = new JTextArea(10, 20);
 
     private final JButton createRaceButton = new JButton("Create Race");
     private final JButton joinRaceButton = new JButton("Join Race");
     private final JButton dashboardButton = new JButton("Open Dashboard");
+    private final JButton saveProgressButton = new JButton("Save Race Progress");
     private final JButton pauseResumeButton = new JButton("Pause Race");
     private final JButton leaveRaceButton = new JButton("Leave Race");
     private final JButton statsButton = new JButton("Race Stats");
@@ -74,10 +85,14 @@ final class ZeroGpRacePanel extends PluginPanel
     private long remainingMilliseconds;
     private long lastResumeAt;
     private long gpEarned;
+    private long bankValueGp;
+    private long raceStartingAllowance;
     private long acceptedItems;
     private long negativeBalanceDeadlineMs;
     private boolean raceRunning;
     private boolean manualPaused;
+    private boolean raceProgressSaved;
+    private long savedRaceProgressGp = -1L;
     private long manualPauseTargetGp;
     private long manualPauseCurrentGp;
     private long manualPauseEquipmentGp;
@@ -105,6 +120,8 @@ final class ZeroGpRacePanel extends PluginPanel
         content.add(title);
         content.add(Box.createRigidArea(new Dimension(0, 12)));
         content.add(infoGrid());
+        content.add(Box.createRigidArea(new Dimension(0, 8)));
+        content.add(buildPauseGuidePanel());
         content.add(Box.createRigidArea(new Dimension(0, 12)));
         content.add(playerListPanel());
         content.add(Box.createRigidArea(new Dimension(0, 12)));
@@ -114,6 +131,7 @@ final class ZeroGpRacePanel extends PluginPanel
         prepareButton(createRaceButton, true);
         prepareButton(joinRaceButton, false);
         prepareButton(dashboardButton, false);
+        prepareButton(saveProgressButton, false);
         prepareButton(pauseResumeButton, false);
         prepareButton(leaveRaceButton, false);
         prepareButton(statsButton, false);
@@ -121,6 +139,7 @@ final class ZeroGpRacePanel extends PluginPanel
         createRaceButton.addActionListener(event -> showCreateRaceDialog());
         joinRaceButton.addActionListener(event -> showJoinRaceDialog());
         dashboardButton.addActionListener(event -> plugin.openDashboard(activeRoomCode));
+        saveProgressButton.addActionListener(event -> plugin.requestSaveRaceProgress());
         pauseResumeButton.addActionListener(event -> toggleManualPause());
         leaveRaceButton.addActionListener(event -> leaveRace());
         statsButton.addActionListener(event -> showRaceStatistics());
@@ -131,6 +150,8 @@ final class ZeroGpRacePanel extends PluginPanel
         content.add(Box.createRigidArea(new Dimension(0, 7)));
         content.add(dashboardButton);
         content.add(Box.createRigidArea(new Dimension(0, 7)));
+        content.add(saveProgressButton);
+        content.add(Box.createRigidArea(new Dimension(0, 7)));
         content.add(pauseResumeButton);
         content.add(Box.createRigidArea(new Dimension(0, 7)));
         content.add(leaveRaceButton);
@@ -138,7 +159,7 @@ final class ZeroGpRacePanel extends PluginPanel
         content.add(statsButton);
 
         JLabel note = new JLabel(
-            "<html><center>Score starts at the host allowance. Imported inventory/equipment and bank withdrawals are debited.</center></html>");
+            "<html><center>Race Score tracks earnings. Bank Value tracks bank purchasing power. Save Race Progress uses inventory value only.</center></html>");
         note.setAlignmentX(CENTER_ALIGNMENT);
         note.setForeground(Color.LIGHT_GRAY);
         note.setBorder(BorderFactory.createEmptyBorder(12, 0, 0, 0));
@@ -153,7 +174,7 @@ final class ZeroGpRacePanel extends PluginPanel
 
     private JPanel infoGrid()
     {
-        JPanel grid = new JPanel(new GridLayout(7, 2, 6, 6));
+        JPanel grid = new JPanel(new GridLayout(8, 2, 6, 6));
         grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         grid.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(GOLD.darker()),
@@ -163,10 +184,122 @@ final class ZeroGpRacePanel extends PluginPanel
         addRow(grid, "Room", roomValue);
         addRow(grid, "Player", playerValue);
         addRow(grid, "Time left", timeValue);
-        addRow(grid, "GP earned", gpValue);
+        addRow(grid, "Race score", gpValue);
+        addRow(grid, "Bank value", bankValue);
         addRow(grid, "Accepted items", acceptedValue);
         addRow(grid, "Multiplayer", multiplayerValue);
         return grid;
+    }
+
+    private JPanel buildPauseGuidePanel()
+    {
+        pauseGuidePanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        pauseGuidePanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(LIGHT_GOLD.darker()),
+            BorderFactory.createEmptyBorder(10, 10, 10, 10)));
+        pauseGuidePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 135));
+
+        addRow(pauseGuidePanel, "Required wealth", pauseRequiredValue);
+        addRow(pauseGuidePanel, "Current wealth", pauseCurrentValue);
+        addRow(pauseGuidePanel, "Difference", pauseDifferenceValue);
+        addRow(pauseGuidePanel, "Resume", pauseReadyValue);
+
+        pauseDifferenceValue.setFont(
+            pauseDifferenceValue.getFont().deriveFont(Font.BOLD));
+        pauseReadyValue.setFont(
+            pauseReadyValue.getFont().deriveFont(Font.BOLD));
+
+        pauseGuidePanel.setVisible(false);
+        return pauseGuidePanel;
+    }
+
+    private void refreshPauseGuide()
+    {
+        pauseGuidePanel.setVisible(manualPaused);
+
+        if (!manualPaused)
+        {
+            pauseRequiredValue.setText("0 GP");
+            pauseCurrentValue.setText("0 GP");
+            pauseDifferenceValue.setText("--");
+            pauseReadyValue.setText("Waiting");
+            return;
+        }
+
+        pauseRequiredValue.setText(String.format(
+            Locale.US,
+            "%,d GP",
+            manualPauseTargetGp));
+
+        if (!manualPauseValueReady)
+        {
+            pauseCurrentValue.setText("Reading...");
+            pauseDifferenceValue.setText("Calculating...");
+            pauseDifferenceValue.setForeground(LIGHT_GOLD);
+            pauseReadyValue.setText("WAIT");
+            pauseReadyValue.setForeground(LIGHT_GOLD);
+            return;
+        }
+
+        pauseCurrentValue.setText(String.format(
+            Locale.US,
+            "%,d GP",
+            manualPauseCurrentGp));
+
+        if (manualPauseEquipmentGp > 0L)
+        {
+            pauseDifferenceValue.setText(String.format(
+                Locale.US,
+                "Remove %,d GP gear",
+                manualPauseEquipmentGp));
+            pauseDifferenceValue.setForeground(RED);
+            pauseReadyValue.setText("BLOCKED");
+            pauseReadyValue.setForeground(RED);
+            return;
+        }
+
+        long difference = manualPauseTargetGp - manualPauseCurrentGp;
+
+        if (difference > 0L)
+        {
+            pauseDifferenceValue.setText(String.format(
+                Locale.US,
+                "Need %,d GP more",
+                difference));
+            pauseDifferenceValue.setForeground(RED);
+            pauseReadyValue.setText("NOT READY");
+            pauseReadyValue.setForeground(RED);
+
+            pauseResumeButton.setText(String.format(
+                Locale.US,
+                "Resume (Need %,d GP)",
+                difference));
+            return;
+        }
+
+        if (difference < 0L)
+        {
+            long excess = Math.abs(difference);
+            pauseDifferenceValue.setText(String.format(
+                Locale.US,
+                "%,d GP too much",
+                excess));
+            pauseDifferenceValue.setForeground(RED);
+            pauseReadyValue.setText("NOT READY");
+            pauseReadyValue.setForeground(RED);
+
+            pauseResumeButton.setText(String.format(
+                Locale.US,
+                "Resume (Remove %,d GP)",
+                excess));
+            return;
+        }
+
+        pauseDifferenceValue.setText("Exact wealth matched");
+        pauseDifferenceValue.setForeground(GREEN);
+        pauseReadyValue.setText("READY");
+        pauseReadyValue.setForeground(GREEN);
+        pauseResumeButton.setText("Resume Race");
     }
 
     private JPanel playerListPanel()
@@ -361,11 +494,18 @@ final class ZeroGpRacePanel extends PluginPanel
         activeRoomCode = roomCode;
         remainingMilliseconds = durationSeconds * 1000L;
         lastResumeAt = 0L;
-        transactionEngine.reset(startingAllowance);
-        gpEarned = transactionEngine.getScore();
+        transactionEngine.reset(0L);
+        raceStartingAllowance = Math.max(0L, startingAllowance);
+
+        // V6: allowance is available bank purchasing power, not Race Score.
+        plugin.startWalletRace(raceStartingAllowance);
+        gpEarned = plugin.currentWalletScore();
+        bankValueGp = plugin.currentWalletBankValue();
         acceptedItems = 0L;
         raceRunning = true;
         manualPaused = false;
+        raceProgressSaved = false;
+        savedRaceProgressGp = -1L;
         manualPauseTargetGp = 0L;
         manualPauseCurrentGp = 0L;
         manualPauseEquipmentGp = 0L;
@@ -376,15 +516,28 @@ final class ZeroGpRacePanel extends PluginPanel
         timeValue.setText(formatSeconds(durationSeconds));
         gpValue.setText(String.format(Locale.US, "%,d GP", gpEarned));
         gpValue.setForeground(Color.WHITE);
+        bankValue.setText(String.format(Locale.US, "%,d GP", bankValueGp));
+        bankValue.setForeground(bankValueGp < 0L ? RED : Color.WHITE);
         acceptedValue.setText("0");
         recentLootArea.setText("No race activity yet.");
         addLedgerEvent(String.format(Locale.US, "RACE STARTED | %s | %s", activeRoomCode, formatSeconds(durationSeconds)));
-        if (gpEarned > 0L)
+        if (raceStartingAllowance > 0L)
         {
             transactionEngine.record(new RaceTransaction(
-                System.currentTimeMillis(), RaceSource.ALLOWANCE, "Starting allowance", 1,
-                gpEarned, 0L, OwnershipType.RACE_OWNED, TransactionStatus.INFO, "Starting balance"));
-            addLedgerEvent(String.format(Locale.US, "ALLOWANCE | +%,d GP", gpEarned));
+                System.currentTimeMillis(),
+                RaceSource.ALLOWANCE,
+                "Starting allowance",
+                1,
+                raceStartingAllowance,
+                0L,
+                OwnershipType.RACE_OWNED,
+                TransactionStatus.INFO,
+                "Starting bank purchasing power"));
+
+            addLedgerEvent(String.format(
+                Locale.US,
+                "ALLOWANCE | Bank value %,d GP",
+                raceStartingAllowance));
         }
         plugin.onLocalRaceStarted();
         multiplayerState = "RUNNING";
@@ -526,7 +679,7 @@ final class ZeroGpRacePanel extends PluginPanel
 
     private void finishRace()
     {
-        if (gpEarned < 0L)
+        if (bankValueGp < 0L)
         {
             disqualifyForNegativeBalance();
             return;
@@ -574,10 +727,16 @@ final class ZeroGpRacePanel extends PluginPanel
         remainingMilliseconds = 0L;
         lastResumeAt = 0L;
         transactionEngine.reset(0L);
+        plugin.startWalletRace(0L);
         gpEarned = 0L;
+        bankValueGp = 0L;
+        bankValue.setText("0 GP");
+        bankValue.setForeground(Color.WHITE);
         acceptedItems = 0L;
         raceRunning = false;
         manualPaused = false;
+        raceProgressSaved = false;
+        savedRaceProgressGp = -1L;
         manualPauseTargetGp = 0L;
         manualPauseCurrentGp = 0L;
         manualPauseEquipmentGp = 0L;
@@ -593,6 +752,98 @@ final class ZeroGpRacePanel extends PluginPanel
         playerListArea.setText("Start or join an online room.");
         multiplayerValue.setText("Local only");
         setStatus(loggedIn ? "Ready" : "Waiting for login", loggedIn ? GREEN : Color.LIGHT_GRAY);
+        updateButtonStates();
+    }
+
+    void onSaveRaceProgressCheck(
+        long inventoryValue,
+        long equipmentValue,
+        long currentBankValue)
+    {
+        if (!raceRunning || manualPaused)
+        {
+            return;
+        }
+
+        if (currentBankValue < 0L)
+        {
+            showError(String.format(
+                Locale.US,
+                "Cannot save race progress while Bank Value is negative.\n\n"
+                    + "Current Bank Value: %,d GP\n\n"
+                    + "Deposit enough value to restore Bank Value to 0 GP or higher first.",
+                currentBankValue));
+            return;
+        }
+
+        if (equipmentValue > 0L)
+        {
+            showError(String.format(
+                Locale.US,
+                "Remove all equipped gear before saving race progress.\n\n"
+                    + "Equipped value: %,d GP",
+                equipmentValue));
+            return;
+        }
+
+        int answer = JOptionPane.showConfirmDialog(
+            this,
+            String.format(
+                Locale.US,
+                "SAVE RACE PROGRESS?\n\n"
+                    + "IMPORTANT:\n"
+                    + "Put ALL race wealth you want to preserve into your inventory before saving.\n\n"
+                    + "Anything left in your bank will NOT be included in the saved race state "
+                    + "and may be lost from the race when you resume.\n\n"
+                    + "Starting allowance is NOT added again.\n"
+                    + "Race Score is NOT added again.\n"
+                    + "Bank Value is NOT added again.\n\n"
+                    + "Current inventory value: %,d GP\n\n"
+                    + "Save this exact value?",
+                inventoryValue),
+            "Save Race Progress",
+            JOptionPane.YES_NO_OPTION,
+            JOptionPane.WARNING_MESSAGE);
+
+        if (answer != JOptionPane.YES_OPTION)
+        {
+            return;
+        }
+
+        savedRaceProgressGp = Math.max(0L, inventoryValue);
+        raceProgressSaved = true;
+        manualPauseTargetGp = savedRaceProgressGp;
+
+        plugin.confirmSaveRaceProgress(savedRaceProgressGp);
+
+        addLedgerEvent(String.format(
+            Locale.US,
+            "RACE PROGRESS SAVED | Inventory %,d GP",
+            savedRaceProgressGp));
+
+        setStatus(String.format(
+            Locale.US,
+            "Progress saved: %,d GP | Ready to pause",
+            savedRaceProgressGp), GREEN);
+
+        updateButtonStates();
+    }
+
+    boolean hasSavedRaceProgress()
+    {
+        return raceProgressSaved && savedRaceProgressGp >= 0L;
+    }
+
+    void invalidateSavedRaceProgress()
+    {
+        if (manualPaused || !raceProgressSaved)
+        {
+            return;
+        }
+
+        raceProgressSaved = false;
+        savedRaceProgressGp = -1L;
+        setStatus("Race changed - save progress again before pausing", LIGHT_GOLD);
         updateButtonStates();
     }
 
@@ -622,6 +873,13 @@ final class ZeroGpRacePanel extends PluginPanel
             return;
         }
 
+        if (!isManualPauseReadyForResume())
+        {
+            showError(manualPauseStatusText());
+            plugin.refreshManualPauseValue();
+            return;
+        }
+
         plugin.requestManualResume();
     }
 
@@ -632,15 +890,18 @@ final class ZeroGpRacePanel extends PluginPanel
             return;
         }
 
-        if (gpEarned < 0L)
+        if (!hasSavedRaceProgress())
         {
-            showError("Return to a non-negative race balance before manually pausing.");
+            showError(
+                "Save Race Progress before pausing.\n\n"
+                    + "Put ALL race wealth you want to preserve into your inventory, "
+                    + "then press Save Race Progress.");
             return;
         }
 
-        // Capture the exact score and timer at the instant Pause is pressed.
         updateCountdown();
-        manualPauseTargetGp = gpEarned;
+
+        manualPauseTargetGp = savedRaceProgressGp;
         manualPauseCurrentGp = 0L;
         manualPauseEquipmentGp = 0L;
         manualPauseValueReady = false;
@@ -651,13 +912,16 @@ final class ZeroGpRacePanel extends PluginPanel
         multiplayerState = "PAUSED";
 
         pauseResumeButton.setText("Resume Race");
+
         addLedgerEvent(String.format(
             Locale.US,
-            "MANUAL PAUSE | Resume target %,d GP",
+            "MANUAL PAUSE | Saved inventory wealth %,d GP",
             manualPauseTargetGp));
 
-        setStatus("Paused - checking resume value...", LIGHT_GOLD);
+        setStatus("Paused", LIGHT_GOLD);
+        refreshPauseGuide();
         updateButtonStates();
+
         plugin.onManualRacePaused(manualPauseTargetGp);
     }
 
@@ -671,7 +935,9 @@ final class ZeroGpRacePanel extends PluginPanel
         manualPauseCurrentGp = Math.max(0L, inventoryValue);
         manualPauseEquipmentGp = Math.max(0L, equipmentValue);
         manualPauseValueReady = true;
-        setStatus(manualPauseStatusText(), LIGHT_GOLD);
+        setStatus("Paused", LIGHT_GOLD);
+        refreshPauseGuide();
+        updateButtonStates();
     }
 
     private String manualPauseStatusText()
@@ -683,7 +949,7 @@ final class ZeroGpRacePanel extends PluginPanel
 
         if (!manualPauseValueReady)
         {
-            return "Paused | Reading current inventory value...";
+            return "Paused | Reading current race wealth...";
         }
 
         if (manualPauseEquipmentGp > 0L)
@@ -699,7 +965,7 @@ final class ZeroGpRacePanel extends PluginPanel
         {
             return String.format(
                 Locale.US,
-                "Paused | Withdraw another %,d GP",
+                "Paused | Need %,d GP more",
                 difference);
         }
 
@@ -707,7 +973,7 @@ final class ZeroGpRacePanel extends PluginPanel
         {
             return String.format(
                 Locale.US,
-                "Paused | Deposit/remove %,d GP",
+                "Paused | You have %,d GP too much",
                 Math.abs(difference));
         }
 
@@ -733,7 +999,7 @@ final class ZeroGpRacePanel extends PluginPanel
                 String.format(
                     Locale.US,
                     "Cannot resume yet.\\n\\n"
-                        + "Paused race value: %,d GP\\n"
+                        + "Required race wealth: %,d GP\\n"
                         + "Inventory value: %,d GP\\n"
                         + "Equipped gear value: %,d GP\\n\\n"
                         + "Deposit the equipped gear, then match the exact paused value in your inventory.",
@@ -757,8 +1023,8 @@ final class ZeroGpRacePanel extends PluginPanel
                 String.format(
                     Locale.US,
                     "Cannot resume yet.\\n\\n"
-                        + "Paused race value: %,d GP\\n"
-                        + "Current inventory value: %,d GP\\n\\n%s",
+                        + "Required race wealth: %,d GP\\n"
+                        + "Current race wealth: %,d GP\\n\\n%s",
                     manualPauseTargetGp,
                     currentInventoryValue,
                     instruction),
@@ -774,21 +1040,52 @@ final class ZeroGpRacePanel extends PluginPanel
             return;
         }
 
+        long restoredValue = manualPauseTargetGp;
+
         manualPaused = false;
-        manualPauseCurrentGp = manualPauseTargetGp;
+        raceProgressSaved = false;
+        savedRaceProgressGp = -1L;
+        manualPauseCurrentGp = restoredValue;
+        manualPauseTargetGp = 0L;
         manualPauseEquipmentGp = 0L;
         manualPauseValueReady = false;
         multiplayerState = "RUNNING";
         pauseResumeButton.setText("Pause Race");
+        refreshPauseGuide();
 
         addLedgerEvent(String.format(
             Locale.US,
-            "MANUAL RESUME | Exact %,d GP restored",
-            manualPauseTargetGp));
+            "MANUAL RESUME | Exact %,d GP restored | Save snapshot cleared",
+            restoredValue));
 
         setStatus("Race running", GREEN);
         resumeTimer();
         updateButtonStates();
+    }
+
+    void updateBankValue(long valueGp)
+    {
+        bankValueGp = valueGp;
+        bankValue.setText(String.format(
+            Locale.US,
+            "%,d GP",
+            bankValueGp));
+        bankValue.setForeground(
+            bankValueGp < 0L ? RED : Color.WHITE);
+
+        if (!raceRunning)
+        {
+            return;
+        }
+
+        if (bankValueGp < 0L)
+        {
+            startNegativeBalanceGraceIfNeeded();
+        }
+        else
+        {
+            clearNegativeBalanceGrace(true);
+        }
     }
 
     void addAcceptedLoot(String itemName, int quantity, long value, String source)
@@ -827,7 +1124,7 @@ final class ZeroGpRacePanel extends PluginPanel
             System.currentTimeMillis(), raceSource, itemName, quantity, Math.abs(signedValue), signedValue,
             OwnershipType.RACE_OWNED, TransactionStatus.ACCEPTED, source));
 
-        gpEarned = transactionEngine.getScore();
+        gpEarned = plugin.applyWalletScoreChange(signedValue);
         gpValue.setText(String.format(Locale.US, "%,d GP", gpEarned));
         gpValue.setForeground(gpEarned < 0L ? RED : Color.WHITE);
 
@@ -836,14 +1133,6 @@ final class ZeroGpRacePanel extends PluginPanel
             "%s x%d  -%,d GP [%s]",
             itemName, quantity, Math.abs(signedValue), source));
 
-        if (gpEarned < 0L)
-        {
-            startNegativeBalanceGraceIfNeeded();
-        }
-        else
-        {
-            clearNegativeBalanceGrace(true);
-        }
     }
 
     void addImportedRefund(String itemName, int quantity, long value, String source)
@@ -854,6 +1143,16 @@ final class ZeroGpRacePanel extends PluginPanel
         }
 
         applyScoreChange(itemName, quantity, Math.abs(value), source);
+    }
+
+    void addGeValueChange(String itemName, int quantity, long signedValue, String source)
+    {
+        if (!raceRunning || quantity <= 0 || signedValue == 0L)
+        {
+            return;
+        }
+
+        applyScoreChange(itemName, quantity, signedValue, source);
     }
 
     private void applyScoreChange(String itemName, int quantity, long signedValue, String source)
@@ -867,7 +1166,7 @@ final class ZeroGpRacePanel extends PluginPanel
             System.currentTimeMillis(), raceSource, itemName, quantity, marketValue, signedValue,
             ownership, status, source));
 
-        gpEarned = transactionEngine.getScore();
+        gpEarned = plugin.applyWalletScoreChange(signedValue);
         gpValue.setText(String.format(Locale.US, "%,d GP", gpEarned));
         gpValue.setForeground(gpEarned < 0L ? RED : Color.WHITE);
 
@@ -877,14 +1176,6 @@ final class ZeroGpRacePanel extends PluginPanel
             itemName, quantity, signedValue >= 0L ? "+" : "", signedValue, source);
         addLedgerEvent(line);
 
-        if (gpEarned < 0L)
-        {
-            startNegativeBalanceGraceIfNeeded();
-        }
-        else
-        {
-            clearNegativeBalanceGrace(true);
-        }
     }
 
     private void showRaceStatistics()
@@ -958,7 +1249,7 @@ final class ZeroGpRacePanel extends PluginPanel
 
     private void startNegativeBalanceGraceIfNeeded()
     {
-        if (!raceRunning || gpEarned >= 0L || negativeBalanceDeadlineMs > 0L)
+        if (!raceRunning || bankValueGp >= 0L || negativeBalanceDeadlineMs > 0L)
         {
             return;
         }
@@ -967,7 +1258,7 @@ final class ZeroGpRacePanel extends PluginPanel
         budgetGraceTimer.start();
         multiplayerState = "OVER_BUDGET";
         addLedgerEvent(String.format(Locale.US,
-            "OVER BUDGET | %,d GP | 30 second grace period started", gpEarned));
+            "BANK OVERDRAWN | %,d GP | 30 second grace period started", bankValueGp));
         updateNegativeBalanceGrace();
     }
 
@@ -985,7 +1276,7 @@ final class ZeroGpRacePanel extends PluginPanel
             return;
         }
 
-        if (gpEarned >= 0L)
+        if (bankValueGp >= 0L)
         {
             clearNegativeBalanceGrace(true);
             return;
@@ -1000,7 +1291,7 @@ final class ZeroGpRacePanel extends PluginPanel
 
         long secondsLeft = (millisLeft + 999L) / 1000L;
         setStatus(String.format(Locale.US,
-            "OVER BUDGET %,d GP - DQ in %ds", gpEarned, secondsLeft), RED);
+            "BANK OVERDRAWN %,d GP - DQ in %ds", bankValueGp, secondsLeft), RED);
         multiplayerState = "OVER_BUDGET";
     }
 
@@ -1017,7 +1308,7 @@ final class ZeroGpRacePanel extends PluginPanel
         if (restored && raceRunning)
         {
             addLedgerEvent(String.format(Locale.US,
-                "BUDGET RESTORED | %,d GP | DQ countdown cancelled", gpEarned));
+                "BANK VALUE RESTORED | %,d GP | DQ countdown cancelled", bankValueGp));
             multiplayerState = loggedIn ? "RUNNING" : "PAUSED";
             setStatus(loggedIn ? "Race running" : "Paused - logged out",
                 loggedIn ? GREEN : LIGHT_GOLD);
@@ -1034,13 +1325,13 @@ final class ZeroGpRacePanel extends PluginPanel
         setStatus("DISQUALIFIED - over budget", RED);
         multiplayerState = "DQ";
         addLedgerEvent(String.format(Locale.US,
-            "DISQUALIFIED | Negative balance %,d GP remained for 30 seconds", gpEarned));
+            "DISQUALIFIED | Bank value %,d GP remained negative for 30 seconds", bankValueGp));
         updateButtonStates();
 
         JOptionPane.showMessageDialog(
             this,
-            "Your race score remained below 0 GP for 30 seconds.\n\nCurrent score: "
-                + String.format(Locale.US, "%,d GP", gpEarned)
+            "Your Bank Value remained below 0 GP for 30 seconds.\n\nCurrent bank value: "
+                + String.format(Locale.US, "%,d GP", bankValueGp)
                 + "\n\nThe grace period expired, so this run has been disqualified.",
             "Race Disqualified",
             JOptionPane.ERROR_MESSAGE);
@@ -1156,6 +1447,14 @@ final class ZeroGpRacePanel extends PluginPanel
         return manualPaused;
     }
 
+    boolean isManualPauseReadyForResume()
+    {
+        return manualPaused
+            && manualPauseValueReady
+            && manualPauseEquipmentGp <= 0L
+            && manualPauseCurrentGp == manualPauseTargetGp;
+    }
+
     long getManualPauseTargetGp()
     {
         return manualPauseTargetGp;
@@ -1168,13 +1467,63 @@ final class ZeroGpRacePanel extends PluginPanel
 
     private void updateButtonStates()
     {
+        pauseGuidePanel.setVisible(manualPaused);
+
         createRaceButton.setEnabled(!raceRunning);
         joinRaceButton.setEnabled(!raceRunning);
         dashboardButton.setEnabled(!activeRoomCode.isEmpty());
-        pauseResumeButton.setEnabled(raceRunning && loggedIn);
-        pauseResumeButton.setText(manualPaused ? "Resume Race" : "Pause Race");
-        leaveRaceButton.setEnabled(raceRunning || !activeRoomCode.isEmpty());
-        statsButton.setEnabled(raceRunning || !activeRoomCode.isEmpty() || !transactionEngine.getTransactions().isEmpty());
+
+        saveProgressButton.setEnabled(
+            raceRunning
+                && loggedIn
+                && !manualPaused);
+
+        if (!raceRunning)
+        {
+            saveProgressButton.setText("Save Race Progress");
+        }
+        else if (!manualPaused && raceProgressSaved)
+        {
+            saveProgressButton.setText(String.format(
+                Locale.US,
+                "Saved: %,d GP",
+                savedRaceProgressGp));
+        }
+        else
+        {
+            saveProgressButton.setText("Save Race Progress");
+        }
+
+        boolean pauseButtonEnabled =
+            raceRunning
+                && loggedIn
+                && (manualPaused
+                    ? isManualPauseReadyForResume()
+                    : hasSavedRaceProgress());
+
+        pauseResumeButton.setEnabled(pauseButtonEnabled);
+
+        if (!manualPaused)
+        {
+            pauseResumeButton.setText(
+                hasSavedRaceProgress()
+                    ? "Pause Race"
+                    : "Pause (Save First)");
+        }
+        else if (isManualPauseReadyForResume())
+        {
+            pauseResumeButton.setText("Resume Race");
+        }
+
+        leaveRaceButton.setEnabled(
+            raceRunning || !activeRoomCode.isEmpty());
+
+        statsButton.setEnabled(
+            raceRunning
+                || !activeRoomCode.isEmpty()
+                || !transactionEngine
+                    .getTransactions()
+                    .isEmpty());
     }
 
     private void setStatus(String text, Color colour)
