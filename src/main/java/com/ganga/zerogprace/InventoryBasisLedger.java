@@ -1,15 +1,8 @@
-package com.ganga.zerogprace;
+package com.ganga.zerogprace.wallet;
 
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * GP cost/value basis for inventory assets.
- *
- * This does NOT identify "race-owned bank items". Bank Value remains a
- * value-only ledger. Basis exists only while value is carried in inventory
- * so a later GE sale can calculate realised profit/loss.
- */
 final class InventoryBasisLedger
 {
     private final Map<Integer, Integer> quantities = new HashMap<>();
@@ -53,20 +46,11 @@ final class InventoryBasisLedger
         else
         {
             usedValue = (heldValue * usedQty) / heldQty;
-
             int remainingQty = heldQty - usedQty;
             long remainingValue = Math.max(0L, heldValue - usedValue);
 
-            if (remainingQty <= 0 || remainingValue <= 0L)
-            {
-                quantities.remove(itemId);
-                values.remove(itemId);
-            }
-            else
-            {
-                quantities.put(itemId, remainingQty);
-                values.put(itemId, remainingValue);
-            }
+            quantities.put(itemId, remainingQty);
+            values.put(itemId, remainingValue);
         }
 
         return Math.max(0L, usedValue);
@@ -78,3 +62,5 @@ final class InventoryBasisLedger
         values.clear();
     }
 }
+
+

@@ -179,26 +179,7 @@ public class ZeroGpRacePlugin extends Plugin
         return walletManager.getBankValueGp();
     }
 
-    private void invalidateSavedProgressIfRunning()
-    {
-        if (panel == null
-            || panel.isManualPaused()
-            || !panel.hasSavedRaceProgress())
-        {
-            return;
-        }
 
-        walletManager.clearSavedProgress();
-
-        ZeroGpRacePanel currentPanel = panel;
-        SwingUtilities.invokeLater(() ->
-        {
-            if (currentPanel != null)
-            {
-                currentPanel.invalidateSavedRaceProgress();
-            }
-        });
-    }
 
     private void publishWalletBankValue()
     {
@@ -224,7 +205,6 @@ public class ZeroGpRacePlugin extends Plugin
 
         if (signedValueGp != 0L)
         {
-            invalidateSavedProgressIfRunning();
         }
 
         return walletManager.getRaceScoreGp();
@@ -2751,7 +2731,6 @@ public class ZeroGpRacePlugin extends Plugin
                 itemId,
                 increase);
             walletManager.addBankValue(value);
-            invalidateSavedProgressIfRunning();
 
             log.info(
                 "0GP BANK V6 | DEPOSIT | item={} qty={} value={} bankValue={}",
@@ -2782,7 +2761,6 @@ public class ZeroGpRacePlugin extends Plugin
             }
 
             walletManager.removeBankValue(value);
-            invalidateSavedProgressIfRunning();
             walletManager.addInventoryBasis(
                 itemId,
                 decrease,
@@ -3503,6 +3481,95 @@ public class ZeroGpRacePlugin extends Plugin
         eligibleDrops.removeIf(drop -> drop.expiresAt < now || drop.remaining <= 0);
         takeClicks.removeIf(click -> click.expiresAt < now);
         directGainSources.removeIf(source -> source.expiresAt < now);
+    }
+
+    void requestCleanRaceStartCheck(Runnable onSuccess)
+    {
+        clientThread.invokeLater(() ->
+        {
+            if (client.getGameState() != GameState.LOGGED_IN)
+            {
+                SwingUtilities.invokeLater(() ->
+                {
+                    if (panel != null)
+                    {
+                        panel.onCleanRaceStartBlocked(
+                            "Log in before starting or joining a race.");
+                    }
+                });
+                return;
+            }
+
+            ItemContainer inventory =
+                client.getItemContainer(InventoryID.INVENTORY);
+            ItemContainer equipment =
+                client.getItemContainer(InventoryID.EQUIPMENT);
+
+            int inventoryStacks = positiveItemStackCount(inventory);
+            int equipmentStacks = positiveItemStackCount(equipment);
+
+            if (inventoryStacks > 0 || equipmentStacks > 0)
+            {
+                StringBuilder message = new StringBuilder();
+                message.append(
+                    "To ensure everyone starts fairly, your inventory and equipment must be completely empty before starting or joining a race.\n\n");
+
+                if (inventoryStacks > 0)
+                {
+                    message.append("Inventory: ")
+                        .append(inventoryStacks)
+                        .append(inventoryStacks == 1 ? " item stack" : " item stacks")
+                        .append(" remaining.\n");
+                }
+
+                if (equipmentStacks > 0)
+                {
+                    message.append("Equipment: ")
+                        .append(equipmentStacks)
+                        .append(equipmentStacks == 1 ? " item" : " items")
+                        .append(" equipped.\n");
+                }
+
+                message.append(
+                    "\nBank all inventory items and remove all equipped gear, then try again.");
+
+                String blockedMessage = message.toString();
+                SwingUtilities.invokeLater(() ->
+                {
+                    if (panel != null)
+                    {
+                        panel.onCleanRaceStartBlocked(blockedMessage);
+                    }
+                });
+                return;
+            }
+
+            SwingUtilities.invokeLater(() ->
+            {
+                if (onSuccess != null)
+                {
+                    onSuccess.run();
+                }
+            });
+        });
+    }
+
+    private int positiveItemStackCount(ItemContainer container)
+    {
+        if (container == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (Item item : container.getItems())
+        {
+            if (item != null && item.getId() > 0 && item.getQuantity() > 0)
+            {
+                count++;
+            }
+        }
+        return count;
     }
 
     private String currentPlayerName()

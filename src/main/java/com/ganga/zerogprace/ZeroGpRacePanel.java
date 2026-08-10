@@ -453,7 +453,14 @@ final class ZeroGpRacePanel extends PluginPanel
         }
 
         long durationSeconds = toSeconds(amount, String.valueOf(unitBox.getSelectedItem()));
-        startRace(raceName, generateRoomCode(), durationSeconds, startingAllowance, true);
+
+        plugin.requestCleanRaceStartCheck(() ->
+            startRace(
+                raceName,
+                generateRoomCode(),
+                durationSeconds,
+                startingAllowance,
+                true));
     }
 
     private void showJoinRaceDialog()
@@ -482,10 +489,13 @@ final class ZeroGpRacePanel extends PluginPanel
             return;
         }
 
-        setMultiplayerStatus("Joining...");
-        joinRaceButton.setEnabled(false);
-        createRaceButton.setEnabled(false);
-        plugin.joinMultiplayerRoom(room);
+        plugin.requestCleanRaceStartCheck(() ->
+        {
+            setMultiplayerStatus("Joining...");
+            joinRaceButton.setEnabled(false);
+            createRaceButton.setEnabled(false);
+            plugin.joinMultiplayerRoom(room);
+        });
     }
 
     private void startRace(String raceName, String roomCode, long durationSeconds, long startingAllowance, boolean createOnlineRoom)
@@ -562,7 +572,7 @@ final class ZeroGpRacePanel extends PluginPanel
             this,
             "Race: " + activeRaceName + "\nRoom: " + activeRoomCode
                 + "\nDuration: " + formatSeconds(durationSeconds)
-                + "\nStarting allowance: " + String.format(Locale.US, "%,d GP", gpEarned)
+                + "\nStarting allowance: " + String.format(Locale.US, "%,d GP", raceStartingAllowance)
                 + "\n\nThe timer pauses whenever you are logged out.",
             "Race Started",
             JOptionPane.INFORMATION_MESSAGE);
@@ -823,7 +833,7 @@ final class ZeroGpRacePanel extends PluginPanel
 
         setStatus(String.format(
             Locale.US,
-            "Progress saved: %,d GP | Ready to pause",
+            "Inventory snapshot locked: %,d GP | Ready to pause",
             savedRaceProgressGp), GREEN);
 
         updateButtonStates();
@@ -834,18 +844,7 @@ final class ZeroGpRacePanel extends PluginPanel
         return raceProgressSaved && savedRaceProgressGp >= 0L;
     }
 
-    void invalidateSavedRaceProgress()
-    {
-        if (manualPaused || !raceProgressSaved)
-        {
-            return;
-        }
 
-        raceProgressSaved = false;
-        savedRaceProgressGp = -1L;
-        setStatus("Race changed - save progress again before pausing", LIGHT_GOLD);
-        updateButtonStates();
-    }
 
     private void toggleManualPause()
     {
@@ -1486,7 +1485,7 @@ final class ZeroGpRacePanel extends PluginPanel
         {
             saveProgressButton.setText(String.format(
                 Locale.US,
-                "Saved: %,d GP",
+                "Resave (%,d GP)",
                 savedRaceProgressGp));
         }
         else
@@ -1616,6 +1615,14 @@ final class ZeroGpRacePanel extends PluginPanel
     private static boolean isBlank(String value)
     {
         return value == null || value.trim().isEmpty();
+    }
+
+    void onCleanRaceStartBlocked(String message)
+    {
+        showError(message == null || message.trim().isEmpty()
+            ? "Empty your inventory and equipment before starting or joining a race."
+            : message);
+        updateButtonStates();
     }
 
     private void showError(String message)
