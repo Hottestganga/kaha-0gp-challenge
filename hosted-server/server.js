@@ -5,6 +5,7 @@ const { URL } = require('url');
 
 const PORT = Number(process.env.PORT || 8787);
 const DISCORD_FINISHED_RACES_WEBHOOK = process.env.DISCORD_FINISHED_RACES_WEBHOOK || '';
+const PUBLIC_WEBSITE_URL = (process.env.PUBLIC_WEBSITE_URL || '').replace(/\/$/, '');
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 24 * 60 * 60 * 1000);
 const PLAYER_STALE_MS = Number(process.env.PLAYER_STALE_MS || 5 * 60 * 1000);
 const DEAD_ROOM_GRACE_MS = Number(process.env.DEAD_ROOM_GRACE_MS || 10 * 60 * 1000);
@@ -164,6 +165,129 @@ function finishedRoomSnapshots() {
     });
 }
 
+
+function shortGp(value) {
+  const n = Number(value) || 0;
+  const abs = Math.abs(n);
+
+  if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B GP`;
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M GP`;
+  if (abs >= 1_000) return `${(n / 1_000).toFixed(1)}K GP`;
+
+  return `${Math.trunc(n).toLocaleString('en-AU')} GP`;
+}
+
+function formatDuration(milliseconds) {
+  let seconds = Math.max(0, Math.floor(Number(milliseconds || 0) / 1000));
+  const days = Math.floor(seconds / 86400);
+  seconds %= 86400;
+  const hours = Math.floor(seconds / 3600);
+  seconds %= 3600;
+  const minutes = Math.floor(seconds / 60);
+
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (minutes || parts.length === 0) parts.push(`${minutes}m`);
+  return parts.join(' ');
+}
+
+function discordStandings(room) {
+  return [...room.players.values()]
+    .filter(player => !isDisqualifiedState(player))
+    .sort((a, b) => (b.score - a.score) || a.playerName.localeCompare(b.playerName));
+}
+
+async function sendFinishedRaceToDiscord(room) {
+  if (!room || room.discordFinishedPosted) {
+    return;
+  }
+
+  if (!DISCORD_FINISHED_RACES_WEBHOOK) {
+    console.warn(`Discord finished-race webhook not configured; skipping ${room.roomCode}`);
+    return;
+  }
+
+  const standings = discordStandings(room);
+  const winner = standings[0] || null;
+
+  if (!winner) {
+    console.warn(`No eligible winner found for finished room ${room.roomCode}`);
+    return;
+  }
+
+  // Mark before awaiting so multiple near-simultaneous syncs cannot double-post.
+  room.discordFinishedPosted = true;
+
+  const podium = standings.slice(0, 10).map((player, index) => {
+    const rank = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
+    return `${rank} **${player.playerName}** — ${shortGp(player.score)}`;
+  }).join('\n');
+
+  const raceUrl = PUBLIC_WEBSITE_URL
+    ? `${PUBLIC_WEBSITE_URL}/race/${encodeURIComponent(room.roomCode)}`
+    : '';
+
+  const embed = {
+    title: `🏆 ${room.raceName || '0GP Race'} — Race Complete`,
+    description: [
+      `**Winner:** 🥇 ${winner.playerName}`,
+      `**Winning Score:** ${shortGp(winner.score)}`,
+      '',
+      podium
+    ].join('\n'),
+    color: 0xE4B63F,
+    fields: [
+      {
+        name: 'Room',
+        value: room.roomCode,
+        inline: true
+      },
+      {
+        name: 'Racers',
+        value: String(standings.length),
+        inline: true
+      },
+      {
+        name: 'Race Duration',
+        value: formatDuration(room.durationMilliseconds),
+        inline: true
+      }
+    ],
+    footer: {
+      text: '0GP Race • Start from nothing. Take the crown.'
+    },
+    timestamp: new Date(room.finishedAt || now()).toISOString()
+  };
+
+  if (raceUrl) {
+    embed.url = raceUrl;
+  }
+
+  try {
+    const response = await fetch(DISCORD_FINISHED_RACES_WEBHOOK, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        username: '0GP Race',
+        embeds: [embed]
+      })
+    });
+
+    if (!response.ok) {
+      room.discordFinishedPosted = false;
+      throw new Error(`Discord webhook failed with HTTP ${response.status}`);
+    }
+
+    console.log(`Discord finished-race announcement posted for ${room.roomCode}`);
+  } catch (error) {
+    room.discordFinishedPosted = false;
+    console.error(`Discord finished-race announcement failed for ${room.roomCode}:`, error);
+  }
+}
+
 function refreshRoomLifecycle(room) {
   if (!room) {
     return;
@@ -180,6 +304,9 @@ function refreshRoomLifecycle(room) {
   if (isFinishedRoom(room)) {
     if (!room.finishedAt) {
       room.finishedAt = now();
+
+      // Fire-and-forget: API sync responses should not wait for Discord.
+      void sendFinishedRaceToDiscord(room);
     }
   } else {
     room.finishedAt = null;
@@ -211,27 +338,6 @@ function readJson(req) {
 function getRoom(code) { return rooms.get(norm(code)); }
 function touch(room) { room.lastActivity = now(); }
 
-async function sendDiscordTestMessage() {
-  if (!DISCORD_FINISHED_RACES_WEBHOOK) {
-    throw new Error('Discord finished-races webhook is not configured');
-  }
-
-  const response = await fetch(DISCORD_FINISHED_RACES_WEBHOOK, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      username: '0GP Race',
-      content: '🏆 **0GP Race Discord connection successful!**\n\nThe finished-races webhook is online and ready.'
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Discord webhook failed with HTTP ${response.status}`);
-  }
-}
-
 async function handleApi(req, res, url) {
   if (req.method === 'OPTIONS') return json(res, 204, {});
 
@@ -244,24 +350,6 @@ async function handleApi(req, res, url) {
       finishedRooms: finishedRoomSnapshots().length,
       deadRooms: [...rooms.values()].filter(isDeadRoom).length
     });
-  }
-
-  if (req.method === 'GET' && url.pathname === '/test-discord') {
-    try {
-      await sendDiscordTestMessage();
-
-      return json(res, 200, {
-        ok: true,
-        message: 'Discord test message sent successfully'
-      });
-    } catch (e) {
-      console.error('Discord test failed:', e);
-
-      return json(res, 500, {
-        ok: false,
-        message: e.message || 'Discord test failed'
-      });
-    }
   }
 
   if (req.method === 'GET' && url.pathname === '/api/rooms') {
@@ -312,6 +400,7 @@ async function handleApi(req, res, url) {
       lastActivity: timestamp,
       deadSince: null,
       finishedAt: null,
+      discordFinishedPosted: false,
       players: new Map()
     };
 
