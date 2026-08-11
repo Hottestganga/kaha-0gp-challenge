@@ -117,6 +117,11 @@ public class ZeroGpRacePlugin extends Plugin
     private long multiplayerSequence;
     private long lastMultiplayerSyncAt;
     private String multiplayerPlayerName = "";
+
+    // v6.1.1 anti-account-swap lock:
+    // an active race belongs to the account that started/joined it.
+    private String raceBoundPlayerName = "";
+    private boolean raceAccountMismatch;
     private long manualPauseResumeTargetGp = -1L;
     private long manualPausePreservedBankCreditGp;
     private long manualPausePreservedBankWealthGp;
@@ -247,7 +252,10 @@ public class ZeroGpRacePlugin extends Plugin
                 return;
             }
 
-            boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
+            boolean loggedIn =
+            client.getGameState() == GameState.LOGGED_IN
+                && !raceAccountMismatch
+                && isRaceAccountValid();
             String playerName = loggedIn ? currentPlayerName() : "";
 
             if (loggedIn)
@@ -410,7 +418,11 @@ public class ZeroGpRacePlugin extends Plugin
     void leaveMultiplayerRoom(String roomCode)
     {
         String apiBase = multiplayerApiBase();
-        String player = multiplayerPlayerName.isEmpty() ? currentPlayerName() : multiplayerPlayerName;
+        String player = !raceBoundPlayerName.isEmpty()
+            ? raceBoundPlayerName
+            : (multiplayerPlayerName.isEmpty()
+                ? currentPlayerName()
+                : multiplayerPlayerName);
         String room = normaliseRoom(roomCode);
         if (!config.multiplayerEnabled() || apiBase == null || player.isEmpty()
             || room.isEmpty() || multiplayerClient == null)
@@ -442,7 +454,9 @@ public class ZeroGpRacePlugin extends Plugin
         }
 
         String room = normaliseRoom(panel.getActiveRoomCode());
-        String player = multiplayerPlayerName;
+        String player = panel.isRaceRunning() && !raceBoundPlayerName.isEmpty()
+            ? raceBoundPlayerName
+            : multiplayerPlayerName;
 
         if (player.isEmpty())
         {
@@ -568,12 +582,54 @@ public class ZeroGpRacePlugin extends Plugin
         if (event.getGameState() == GameState.LOGGED_IN)
         {
             String playerName = currentPlayerName();
-            if (!playerName.isEmpty())
+
+            if (panel.isRaceRunning()
+                && raceBoundPlayerName != null
+                && !raceBoundPlayerName.isEmpty()
+                && !raceBoundPlayerName.equalsIgnoreCase(playerName))
             {
-                multiplayerPlayerName = playerName;
+                raceAccountMismatch = true;
+                previousInventory.clear();
+                previousBank.clear();
+                inventoryPrimed = false;
+                bankPrimed = false;
+
+                log.warn(
+                    "0GP ACCOUNT LOCK | blocked account switch | racePlayer={} currentPlayer={}",
+                    raceBoundPlayerName,
+                    playerName);
+
+                syncMultiplayerState();
+
+                String expected = raceBoundPlayerName;
+                String actual = playerName;
+
+                SwingUtilities.invokeLater(() ->
+                {
+                    if (panel != null)
+                    {
+                        panel.onRaceAccountMismatch(
+                            expected,
+                            actual);
+                    }
+                });
+
+                return;
             }
 
-            // Push RUNNING immediately using RuneLite's real game state.
+            raceAccountMismatch = false;
+
+            if (!playerName.isEmpty())
+            {
+                // During an active race the bound account remains the
+                // multiplayer identity even across logout/login cycles.
+                multiplayerPlayerName =
+                    panel.isRaceRunning()
+                        && !raceBoundPlayerName.isEmpty()
+                        ? raceBoundPlayerName
+                        : playerName;
+            }
+
             syncMultiplayerState();
 
             SwingUtilities.invokeLater(() ->
@@ -595,9 +651,10 @@ public class ZeroGpRacePlugin extends Plugin
             case CONNECTION_LOST:
             case HOPPING:
                 previousInventory.clear();
+                previousBank.clear();
                 inventoryPrimed = false;
+                bankPrimed = false;
 
-                // Push PAUSED immediately, before client.getLocalPlayer() disappears.
                 syncMultiplayerState();
 
                 SwingUtilities.invokeLater(() ->
@@ -1107,6 +1164,8 @@ public class ZeroGpRacePlugin extends Plugin
         if (panel != null
             && panel.isRaceRunning()
             && panel.isManualPaused()
+            && !raceAccountMismatch
+            && isRaceAccountValid()
             && client.getGameState() == GameState.LOGGED_IN)
         {
             // While paused, any container change can alter the value available
@@ -2028,6 +2087,8 @@ public class ZeroGpRacePlugin extends Plugin
             if (panel == null
                 || !panel.isRaceRunning()
                 || panel.isManualPaused()
+                || raceAccountMismatch
+                || !isRaceAccountValid()
                 || client.getGameState()
                     != GameState.LOGGED_IN)
             {
@@ -2214,7 +2275,9 @@ public class ZeroGpRacePlugin extends Plugin
         {
             if (panel == null
                 || !panel.isRaceRunning()
-                || !panel.isManualPaused())
+                || !panel.isManualPaused()
+                || raceAccountMismatch
+                || !isRaceAccountValid())
             {
                 return;
             }
@@ -2343,6 +2406,8 @@ public class ZeroGpRacePlugin extends Plugin
     {
         if (panel == null
             || !panel.isManualPaused()
+            || raceAccountMismatch
+            || !isRaceAccountValid()
             || client.getGameState()
                 != GameState.LOGGED_IN)
         {
@@ -2411,9 +2476,20 @@ public class ZeroGpRacePlugin extends Plugin
     {
         resetTrackingState();
 
+        String player = currentPlayerName();
+        raceBoundPlayerName = player == null ? "" : player.trim();
+        raceAccountMismatch = false;
+
+        if (!raceBoundPlayerName.isEmpty())
+        {
+            multiplayerPlayerName = raceBoundPlayerName;
+        }
+
+        log.info(
+            "0GP ACCOUNT LOCK | race bound to player={}",
+            raceBoundPlayerName);
+
         // RuneLite client containers must be read on the client thread.
-        // The race starts at a true 0 GP balance: anything already in the
-        // inventory or equipment is treated as imported value and debited.
         clientThread.invokeLater(() ->
         {
             primeInventory();
@@ -2858,11 +2934,38 @@ public class ZeroGpRacePlugin extends Plugin
         inventoryPrimed = true;
     }
 
+    private boolean isRaceAccountValid()
+    {
+        if (panel == null || !panel.isRaceRunning())
+        {
+            return true;
+        }
+
+        if (raceBoundPlayerName == null
+            || raceBoundPlayerName.trim().isEmpty())
+        {
+            return true;
+        }
+
+        String current = currentPlayerName();
+        return !current.isEmpty()
+            && raceBoundPlayerName.equalsIgnoreCase(current);
+    }
+
+    private boolean isRaceAccountMismatch()
+    {
+        return panel != null
+            && panel.isRaceRunning()
+            && raceAccountMismatch;
+    }
+
     private boolean canTrackLoot()
     {
         return panel != null
             && panel.isRaceRunning()
             && !panel.isManualPaused()
+            && !raceAccountMismatch
+            && isRaceAccountValid()
             && client.getGameState() == GameState.LOGGED_IN;
     }
 

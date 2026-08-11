@@ -42,6 +42,10 @@ final class ZeroGpRacePanel extends PluginPanel
     private static final Color GREEN = new Color(80, 200, 120);
     private static final Color LIGHT_GOLD = new Color(245, 210, 100);
     private static final Color RED = new Color(220, 80, 80);
+    private static final Color CARD_BG = new Color(34, 34, 34);
+    private static final Color PANEL_BG = new Color(24, 24, 24);
+    private static final Color MUTED = new Color(165, 165, 165);
+    private static final Color CYAN = new Color(90, 190, 210);
     private static final DateTimeFormatter EVENT_TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final int MAX_EVENT_LINES = 12;
     private static final long NEGATIVE_BALANCE_GRACE_MS = 30_000L;
@@ -49,6 +53,7 @@ final class ZeroGpRacePanel extends PluginPanel
     private final ZeroGpRacePlugin plugin;
 
     private final JLabel statusValue = valueLabel("Waiting");
+    private final JLabel raceNameValue = valueLabel("No active race");
     private final JLabel roomValue = valueLabel("Not set");
     private final JLabel playerValue = valueLabel("Not logged in");
     private final JLabel timeValue = valueLabel("--:--:--");
@@ -111,22 +116,33 @@ final class ZeroGpRacePanel extends PluginPanel
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
         content.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        content.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        content.setBorder(BorderFactory.createEmptyBorder(10, 10, 12, 10));
 
-        JLabel title = new JLabel("0GP RACE", SwingConstants.CENTER);
+        JLabel title = new JLabel("0GP Race", SwingConstants.CENTER);
         title.setAlignmentX(CENTER_ALIGNMENT);
         title.setForeground(GOLD);
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 18f));
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 17f));
         content.add(title);
-        content.add(Box.createRigidArea(new Dimension(0, 12)));
+
+        JLabel subtitle = new JLabel("Competitive race tracker", SwingConstants.CENTER);
+        subtitle.setAlignmentX(CENTER_ALIGNMENT);
+        subtitle.setForeground(Color.GRAY);
+        subtitle.setFont(subtitle.getFont().deriveFont(10f));
+        content.add(subtitle);
+
+        content.add(Box.createRigidArea(new Dimension(0, 10)));
+        content.add(buildStatusPanel());
+        content.add(Box.createRigidArea(new Dimension(0, 8)));
+        content.add(buildWealthPanel());
+        content.add(Box.createRigidArea(new Dimension(0, 8)));
         content.add(infoGrid());
         content.add(Box.createRigidArea(new Dimension(0, 8)));
         content.add(buildPauseGuidePanel());
-        content.add(Box.createRigidArea(new Dimension(0, 12)));
+        content.add(Box.createRigidArea(new Dimension(0, 10)));
         content.add(playerListPanel());
-        content.add(Box.createRigidArea(new Dimension(0, 12)));
+        content.add(Box.createRigidArea(new Dimension(0, 10)));
         content.add(recentLootPanel());
-        content.add(Box.createRigidArea(new Dimension(0, 12)));
+        content.add(Box.createRigidArea(new Dimension(0, 10)));
 
         prepareButton(createRaceButton, true);
         prepareButton(joinRaceButton, false);
@@ -144,25 +160,16 @@ final class ZeroGpRacePanel extends PluginPanel
         leaveRaceButton.addActionListener(event -> leaveRace());
         statsButton.addActionListener(event -> showRaceStatistics());
 
-        content.add(createRaceButton);
-        content.add(Box.createRigidArea(new Dimension(0, 7)));
-        content.add(joinRaceButton);
-        content.add(Box.createRigidArea(new Dimension(0, 7)));
-        content.add(dashboardButton);
-        content.add(Box.createRigidArea(new Dimension(0, 7)));
-        content.add(saveProgressButton);
-        content.add(Box.createRigidArea(new Dimension(0, 7)));
-        content.add(pauseResumeButton);
-        content.add(Box.createRigidArea(new Dimension(0, 7)));
-        content.add(leaveRaceButton);
-        content.add(Box.createRigidArea(new Dimension(0, 7)));
-        content.add(statsButton);
+        content.add(buildActionPanel());
 
         JLabel note = new JLabel(
-            "<html><center>Race Score tracks earnings. Bank Value tracks bank purchasing power. Save Race Progress uses inventory value only.</center></html>");
+            "<html><center><font color='#9b9b9b'>"
+                + "Race Score = earned value / realised P&amp;L<br>"
+                + "Bank Value = available race purchasing power"
+                + "</font></center></html>");
         note.setAlignmentX(CENTER_ALIGNMENT);
-        note.setForeground(Color.LIGHT_GRAY);
-        note.setBorder(BorderFactory.createEmptyBorder(12, 0, 0, 0));
+        note.setFont(note.getFont().deriveFont(9f));
+        note.setBorder(BorderFactory.createEmptyBorder(9, 4, 0, 4));
         content.add(note);
 
         add(content, BorderLayout.NORTH);
@@ -172,30 +179,125 @@ final class ZeroGpRacePanel extends PluginPanel
         updateButtonStates();
     }
 
-    private JPanel infoGrid()
+    private JPanel buildStatusPanel()
     {
-        JPanel grid = new JPanel(new GridLayout(8, 2, 6, 6));
-        grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        grid.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(GOLD.darker()),
-            BorderFactory.createEmptyBorder(10, 10, 10, 10)));
+        JPanel statusPanel = new JPanel(new BorderLayout(6, 0));
+        statusPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        statusPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(68, 68, 68)),
+            BorderFactory.createEmptyBorder(7, 8, 7, 8)));
+        statusPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
 
-        addRow(grid, "Status", statusValue);
-        addRow(grid, "Room", roomValue);
-        addRow(grid, "Player", playerValue);
+        JLabel label = new JLabel("Status");
+        label.setForeground(Color.LIGHT_GRAY);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
+
+        statusValue.setHorizontalAlignment(SwingConstants.RIGHT);
+        statusValue.setFont(statusValue.getFont().deriveFont(Font.BOLD, 11f));
+
+        statusPanel.add(label, BorderLayout.WEST);
+        statusPanel.add(statusValue, BorderLayout.CENTER);
+        return statusPanel;
+    }
+
+    private JPanel buildWealthPanel()
+    {
+        JPanel panel = sectionPanel("Race progress");
+        JPanel grid = new JPanel(new GridLayout(3, 2, 6, 6));
+        grid.setOpaque(false);
+
+        timeValue.setForeground(Color.WHITE);
+        timeValue.setFont(timeValue.getFont().deriveFont(Font.BOLD));
+
+        gpValue.setForeground(GOLD);
+        gpValue.setFont(gpValue.getFont().deriveFont(Font.BOLD));
+
+        bankValue.setForeground(LIGHT_GOLD);
+        bankValue.setFont(bankValue.getFont().deriveFont(Font.BOLD));
+
         addRow(grid, "Time left", timeValue);
         addRow(grid, "Race score", gpValue);
         addRow(grid, "Bank value", bankValue);
-        addRow(grid, "Accepted items", acceptedValue);
+
+        panel.add(grid, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel sectionPanel(String title)
+    {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(68, 68, 68)),
+            BorderFactory.createEmptyBorder(8, 8, 8, 8)));
+
+        if (title != null && !title.isEmpty())
+        {
+            JLabel heading = new JLabel(title);
+            heading.setForeground(GOLD);
+            heading.setFont(heading.getFont().deriveFont(Font.BOLD, 11f));
+            heading.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+            panel.add(heading, BorderLayout.NORTH);
+        }
+
+        return panel;
+    }
+
+    private JPanel buildActionPanel()
+    {
+        JPanel outer = sectionPanel("Controls");
+
+        JPanel buttons = new JPanel();
+        buttons.setOpaque(false);
+        buttons.setLayout(new BoxLayout(buttons, BoxLayout.Y_AXIS));
+
+        JPanel setupRow = new JPanel(new GridLayout(1, 2, 5, 0));
+        setupRow.setOpaque(false);
+        setupRow.add(createRaceButton);
+        setupRow.add(joinRaceButton);
+        setupRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+
+        JPanel utilityRow = new JPanel(new GridLayout(1, 2, 5, 0));
+        utilityRow.setOpaque(false);
+        utilityRow.add(dashboardButton);
+        utilityRow.add(statsButton);
+        utilityRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+
+        buttons.add(setupRow);
+        buttons.add(Box.createRigidArea(new Dimension(0, 5)));
+        buttons.add(utilityRow);
+        buttons.add(Box.createRigidArea(new Dimension(0, 8)));
+        buttons.add(saveProgressButton);
+        buttons.add(Box.createRigidArea(new Dimension(0, 5)));
+        buttons.add(pauseResumeButton);
+        buttons.add(Box.createRigidArea(new Dimension(0, 5)));
+        buttons.add(leaveRaceButton);
+
+        outer.add(buttons, BorderLayout.CENTER);
+        return outer;
+    }
+
+    private JPanel infoGrid()
+    {
+        JPanel outer = sectionPanel("Race details");
+        JPanel grid = new JPanel(new GridLayout(5, 2, 6, 5));
+        grid.setOpaque(false);
+
+        addRow(grid, "Race", raceNameValue);
+        addRow(grid, "Room", roomValue);
+        addRow(grid, "Player", playerValue);
+        addRow(grid, "Accepted loot", acceptedValue);
         addRow(grid, "Multiplayer", multiplayerValue);
-        return grid;
+
+        outer.add(grid, BorderLayout.CENTER);
+        return outer;
     }
 
     private JPanel buildPauseGuidePanel()
     {
         pauseGuidePanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         pauseGuidePanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(LIGHT_GOLD.darker()),
+            BorderFactory.createLineBorder(new Color(68, 68, 68)),
             BorderFactory.createEmptyBorder(10, 10, 10, 10)));
         pauseGuidePanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 135));
 
@@ -304,44 +406,28 @@ final class ZeroGpRacePanel extends PluginPanel
 
     private JPanel playerListPanel()
     {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        panel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(GOLD.darker()),
-            BorderFactory.createEmptyBorder(8, 8, 8, 8)));
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 135));
-
-        JLabel heading = new JLabel("Live players");
-        heading.setForeground(GOLD);
-        heading.setFont(heading.getFont().deriveFont(Font.BOLD));
+        JPanel panel = sectionPanel("Live leaderboard");
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 150));
 
         playerListArea.setEditable(false);
         playerListArea.setFocusable(false);
         playerListArea.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         playerListArea.setForeground(Color.WHITE);
+        playerListArea.setFont(playerListArea.getFont().deriveFont(11f));
         playerListArea.setText("Start or join an online room.");
 
         JScrollPane scrollPane = new JScrollPane(playerListArea);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.getViewport().setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-        panel.add(heading, BorderLayout.NORTH);
         panel.add(scrollPane, BorderLayout.CENTER);
         return panel;
     }
 
     private JPanel recentLootPanel()
     {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        panel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(GOLD.darker()),
-            BorderFactory.createEmptyBorder(8, 8, 8, 8)));
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 245));
-
-        JLabel heading = new JLabel("Race activity log");
-        heading.setForeground(GOLD);
-        heading.setFont(heading.getFont().deriveFont(Font.BOLD));
+        JPanel panel = sectionPanel("Recent activity");
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 225));
 
         recentLootArea.setEditable(false);
         recentLootArea.setFocusable(false);
@@ -349,13 +435,13 @@ final class ZeroGpRacePanel extends PluginPanel
         recentLootArea.setWrapStyleWord(true);
         recentLootArea.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         recentLootArea.setForeground(Color.WHITE);
+        recentLootArea.setFont(recentLootArea.getFont().deriveFont(10.5f));
         recentLootArea.setText("No race activity yet.");
 
         JScrollPane scrollPane = new JScrollPane(recentLootArea);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.getViewport().setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-        panel.add(heading, BorderLayout.NORTH);
         panel.add(scrollPane, BorderLayout.CENTER);
         return panel;
     }
@@ -364,6 +450,10 @@ final class ZeroGpRacePanel extends PluginPanel
     {
         JLabel key = new JLabel(label + ":");
         key.setForeground(Color.LIGHT_GRAY);
+        key.setFont(key.getFont().deriveFont(10.5f));
+
+        value.setHorizontalAlignment(SwingConstants.RIGHT);
+
         panel.add(key);
         panel.add(value);
     }
@@ -378,13 +468,20 @@ final class ZeroGpRacePanel extends PluginPanel
     private void prepareButton(JButton button, boolean gold)
     {
         button.setAlignmentX(CENTER_ALIGNMENT);
-        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        button.setMinimumSize(new Dimension(0, 32));
         button.setFocusPainted(false);
+        button.setFont(button.getFont().deriveFont(Font.BOLD, 10.5f));
+
         if (gold)
         {
             button.setBackground(GOLD);
             button.setForeground(Color.BLACK);
-            button.setFont(button.getFont().deriveFont(Font.BOLD));
+        }
+        else
+        {
+            button.setBackground(ColorScheme.MEDIUM_GRAY_COLOR);
+            button.setForeground(Color.WHITE);
         }
     }
 
@@ -522,6 +619,7 @@ final class ZeroGpRacePanel extends PluginPanel
         manualPauseValueReady = false;
         clearNegativeBalanceGrace(false);
 
+        raceNameValue.setText(activeRaceName);
         roomValue.setText(activeRoomCode);
         timeValue.setText(formatSeconds(durationSeconds));
         gpValue.setText(String.format(Locale.US, "%,d GP", gpEarned));
@@ -573,7 +671,8 @@ final class ZeroGpRacePanel extends PluginPanel
             "Race: " + activeRaceName + "\nRoom: " + activeRoomCode
                 + "\nDuration: " + formatSeconds(durationSeconds)
                 + "\nStarting allowance: " + String.format(Locale.US, "%,d GP", raceStartingAllowance)
-                + "\n\nThe timer pauses whenever you are logged out.",
+                + "\n\nThe timer pauses whenever you are logged out."
+                + "\nThis race is locked to the account that started/joined it.",
             "Race Started",
             JOptionPane.INFORMATION_MESSAGE);
     }
@@ -606,6 +705,53 @@ final class ZeroGpRacePanel extends PluginPanel
         {
             setStatus("Ready", GREEN);
         }
+    }
+
+    void onRaceAccountMismatch(
+        String expectedPlayer,
+        String actualPlayer)
+    {
+        loggedIn = false;
+        lastResumeAt = 0L;
+        countdownTimer.stop();
+
+        currentPlayerName =
+            isBlank(actualPlayer)
+                ? ""
+                : actualPlayer;
+
+        playerValue.setText(
+            isBlank(actualPlayer)
+                ? "Wrong account"
+                : actualPlayer + " (LOCKED)");
+
+        multiplayerState = "PAUSED";
+
+        setStatus(
+            "ACCOUNT LOCKED",
+            RED);
+
+        addLedgerEvent(
+            "ACCOUNT LOCK | Race belongs to "
+                + expectedPlayer
+                + " | Current login "
+                + actualPlayer);
+
+        JOptionPane.showMessageDialog(
+            this,
+            "This active race is locked to:\n\n"
+                + expectedPlayer
+                + "\n\nYou are currently logged in as:\n\n"
+                + actualPlayer
+                + "\n\nThe race will remain paused and no wealth, loot, "
+                + "bank or GE activity will count on this account.\n\n"
+                + "Log back into "
+                + expectedPlayer
+                + " to continue the race.",
+            "Race Account Locked",
+            JOptionPane.WARNING_MESSAGE);
+
+        updateButtonStates();
     }
 
     void onLoggedOut()
@@ -753,6 +899,7 @@ final class ZeroGpRacePanel extends PluginPanel
         clearNegativeBalanceGrace(false);
         multiplayerState = "IDLE";
 
+        raceNameValue.setText("No active race");
         roomValue.setText("Not set");
         timeValue.setText("--:--:--");
         gpValue.setText("0 GP");
@@ -1529,6 +1676,7 @@ final class ZeroGpRacePanel extends PluginPanel
     {
         statusValue.setText(text);
         statusValue.setForeground(colour);
+        statusValue.setToolTipText(text);
     }
 
     private static long parseGpAllowance(String text)
