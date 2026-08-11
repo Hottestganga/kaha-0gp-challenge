@@ -4,6 +4,7 @@ const http = require('http');
 const { URL } = require('url');
 
 const PORT = Number(process.env.PORT || 8787);
+const DISCORD_FINISHED_RACES_WEBHOOK = process.env.DISCORD_FINISHED_RACES_WEBHOOK || '';
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 24 * 60 * 60 * 1000);
 const PLAYER_STALE_MS = Number(process.env.PLAYER_STALE_MS || 5 * 60 * 1000);
 const DEAD_ROOM_GRACE_MS = Number(process.env.DEAD_ROOM_GRACE_MS || 10 * 60 * 1000);
@@ -210,6 +211,27 @@ function readJson(req) {
 function getRoom(code) { return rooms.get(norm(code)); }
 function touch(room) { room.lastActivity = now(); }
 
+async function sendDiscordTestMessage() {
+  if (!DISCORD_FINISHED_RACES_WEBHOOK) {
+    throw new Error('Discord finished-races webhook is not configured');
+  }
+
+  const response = await fetch(DISCORD_FINISHED_RACES_WEBHOOK, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      username: '0GP Race',
+      content: '🏆 **0GP Race Discord connection successful!**\n\nThe finished-races webhook is online and ready.'
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Discord webhook failed with HTTP ${response.status}`);
+  }
+}
+
 async function handleApi(req, res, url) {
   if (req.method === 'OPTIONS') return json(res, 204, {});
 
@@ -222,6 +244,24 @@ async function handleApi(req, res, url) {
       finishedRooms: finishedRoomSnapshots().length,
       deadRooms: [...rooms.values()].filter(isDeadRoom).length
     });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/test-discord') {
+    try {
+      await sendDiscordTestMessage();
+
+      return json(res, 200, {
+        ok: true,
+        message: 'Discord test message sent successfully'
+      });
+    } catch (e) {
+      console.error('Discord test failed:', e);
+
+      return json(res, 500, {
+        ok: false,
+        message: e.message || 'Discord test failed'
+      });
+    }
   }
 
   if (req.method === 'GET' && url.pathname === '/api/rooms') {
