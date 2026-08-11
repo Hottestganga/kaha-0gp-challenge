@@ -13,10 +13,14 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.Client;
@@ -78,6 +82,377 @@ public class ZeroGpRacePlugin extends Plugin
     private static final long SKILL_GAIN_LIFETIME_MS = 3_000L;
     private static final long RACE_ITEM_OPEN_LIFETIME_MS = 3_000L;
     private static final long MULTIPLAYER_SYNC_INTERVAL_MS = 2_000L;
+
+    // Static WORLD SPAWN anti-import rule.
+    // Only items on the approved OSRS Wiki Item Spawn list may enter through
+    // WORLD SPAWN provenance, and no single stack may exceed this safety cap.
+    // We deliberately do NOT track spawn coordinates to keep the rule simple.
+    private static final int MAX_WORLD_SPAWN_STACK = 25;
+    private static final Set<String> APPROVED_WORLD_SPAWN_NAMES =
+        new HashSet<>(Arrays.asList(
+        "address form",
+        "ahab's beer",
+        "air rune",
+        "amulet mould",
+        "ancestral key",
+        "arcenia root",
+        "arctic pine logs",
+        "asgarnian ale",
+        "ashes",
+        "astronomy book",
+        "attack potion",
+        "ball",
+        "ball of wool",
+        "banana",
+        "barrel",
+        "bat bones",
+        "beer",
+        "beer glass",
+        "beer tankard",
+        "big bones",
+        "big fishing net",
+        "bird snare",
+        "black cog",
+        "black dagger",
+        "black robe",
+        "black scimitar",
+        "blood pint",
+        "blood rune",
+        "bloody bracer",
+        "bloody grimoire",
+        "blue cog",
+        "blue dragon scale",
+        "blue hat",
+        "body rune",
+        "bones",
+        "boots of lightness",
+        "bottle of 'tonic'",
+        "bowl",
+        "bowl of water",
+        "box trap",
+        "bracelet mould",
+        "brass key",
+        "brass necklace",
+        "bread",
+        "brewin' guide",
+        "broken arrow",
+        "broken fishing rod",
+        "broken glass",
+        "broken hasta",
+        "broken pole",
+        "bronze arrow",
+        "bronze arrowtips",
+        "bronze axe",
+        "bronze bar",
+        "bronze bolts",
+        "bronze chainbody",
+        "bronze dagger",
+        "bronze dart",
+        "bronze mace",
+        "bronze med helm",
+        "bronze nails",
+        "bronze pickaxe",
+        "bronze scimitar",
+        "bronze spear",
+        "bronze sq shield",
+        "bronze sword",
+        "bucket",
+        "bucket of milk",
+        "bucket of sand",
+        "bucket of water",
+        "bug lantern",
+        "bullseye lantern",
+        "burnt bones",
+        "burnt bread",
+        "burnt chicken",
+        "burnt fish",
+        "burnt meat",
+        "burnt shrimp",
+        "cabbage",
+        "cabbages",
+        "cake",
+        "cake tin",
+        "candle",
+        "candle lantern",
+        "cattleprod",
+        "cave nightshade",
+        "chaos rune",
+        "charcoal",
+        "cheese",
+        "chichilihui rosé",
+        "child's blanket",
+        "chisel",
+        "chocolate bar",
+        "chopped garlic",
+        "chopped onion",
+        "cider",
+        "clay",
+        "cocktail glass",
+        "cocktail shaker",
+        "coins",
+        "cooked chicken",
+        "cooked meat",
+        "cooked sweetcorn",
+        "cooking apple",
+        "cosmic rune",
+        "criminal's dagger",
+        "crossbow",
+        "crumbling tome",
+        "cup of tea",
+        "damaged armour",
+        "damp sticks",
+        "dark fishing bait",
+        "death rune",
+        "deed",
+        "diary",
+        "doogle leaves",
+        "door key",
+        "dragon bitter",
+        "dragonstone",
+        "druid pouch",
+        "dusty key",
+        "dwarf remains",
+        "dwarven stout",
+        "dwellberries",
+        "earth rune",
+        "eclipse red",
+        "edible seaweed",
+        "egg",
+        "embalming manual",
+        "empty cup",
+        "empty sack",
+        "engine",
+        "equa leaves",
+        "explosive discovery",
+        "facemask",
+        "feather",
+        "feathered journal",
+        "fingernails",
+        "fire rune",
+        "fish food",
+        "fishing bait",
+        "fishing rod",
+        "flash powder",
+        "fly fishing rod",
+        "forlorn boot",
+        "fossilised skull",
+        "garlic",
+        "glassblowing book",
+        "glassblowing pipe",
+        "gold bar",
+        "gold necklace",
+        "gold ore",
+        "gold ring",
+        "grail bell",
+        "grain",
+        "granite tablet",
+        "grapes",
+        "grey toy horsey",
+        "grimy guam leaf",
+        "guide book",
+        "haemalchemy volume 1",
+        "hammer",
+        "harpoon",
+        "headless arrow",
+        "herring",
+        "holy grail",
+        "holy mould",
+        "hourglass",
+        "insect repellent",
+        "iron arrow",
+        "iron axe",
+        "iron bar",
+        "iron battleaxe",
+        "iron dagger",
+        "iron dart",
+        "iron full helm",
+        "iron kiteshield",
+        "iron knife",
+        "iron longsword",
+        "iron mace",
+        "iron med helm",
+        "iron nails",
+        "iron pickaxe",
+        "iron platebody",
+        "iron scimitar",
+        "iron spit",
+        "iron sword",
+        "iron warhammer",
+        "jangerberries",
+        "jug",
+        "jug of water",
+        "jug of wine",
+        "kebab",
+        "keg",
+        "keg of beer",
+        "key",
+        "king worm",
+        "knife",
+        "lamp",
+        "leather",
+        "leather body",
+        "leather boots",
+        "leather gloves",
+        "left boot",
+        "letter",
+        "lever",
+        "lift manual",
+        "lobster pot",
+        "lockpick",
+        "logs",
+        "longbow",
+        "magic staff",
+        "magic whistle",
+        "mahogany logs",
+        "metal spade",
+        "mind rune",
+        "mithril arrow",
+        "monk's robe",
+        "monk's robe top",
+        "monkey skull",
+        "muddy rock",
+        "nature rune",
+        "necklace mould",
+        "needle",
+        "noose wand",
+        "oak shield",
+        "oak shortbow",
+        "odd spectacles",
+        "oil can",
+        "oil lamp",
+        "oil lantern",
+        "old journal",
+        "old key",
+        "old note",
+        "onion",
+        "orange",
+        "orange dye",
+        "panning tray",
+        "papyrus",
+        "pat of butter",
+        "pat of not garlic butter",
+        "pestle and mortar",
+        "phoenix crossbow",
+        "pickled brain",
+        "picture",
+        "pie dish",
+        "pigeon cage",
+        "pineapple",
+        "plank",
+        "poison",
+        "pole",
+        "pot",
+        "pot of flour",
+        "potato",
+        "potato cactus",
+        "premade blurb' sp.",
+        "premade choc s'dy",
+        "pungent pot",
+        "purple dye",
+        "queen help book",
+        "rake",
+        "rat poison",
+        "raw herring",
+        "raw rat meat",
+        "raw shrimps",
+        "raw tuna",
+        "red cog",
+        "red dye",
+        "red spiders' eggs",
+        "redberry pie",
+        "right boot",
+        "ring mould",
+        "rock",
+        "rope",
+        "rotten apple",
+        "rotten barrel",
+        "rotten food",
+        "rotten tomato",
+        "rubber tube",
+        "ruby ring",
+        "sapphire",
+        "sapphire bolt tips",
+        "saw",
+        "sea shell",
+        "seaweed",
+        "shale tablet",
+        "shaman robe",
+        "shears",
+        "shiny key",
+        "shoes",
+        "shortbow",
+        "silk",
+        "skull",
+        "slate tablet",
+        "sled",
+        "sliced mushrooms",
+        "small fishing net",
+        "smashed glass",
+        "smelly journal",
+        "snape grass",
+        "soft clay",
+        "spade",
+        "spirit angler headband",
+        "staff",
+        "staff of armadyl",
+        "staff of earth",
+        "steamforge brew",
+        "steel arrow",
+        "steel arrowtips",
+        "steel bar",
+        "steel dagger",
+        "steel knife",
+        "steel longsword",
+        "steel pickaxe",
+        "steel platebody",
+        "steel platelegs",
+        "steel scimitar",
+        "steel spear",
+        "steel sword",
+        "stick",
+        "stone ball",
+        "stone tablet",
+        "strange implement",
+        "strawberry",
+        "sun-shine",
+        "sunbeam ale",
+        "superantipoison",
+        "swamp tar",
+        "swamp toad",
+        "sweetcorn",
+        "tankard",
+        "tarn's diary",
+        "teak plank",
+        "teasing stick",
+        "the turncloak",
+        "thread",
+        "tiara mould",
+        "tile",
+        "tiles",
+        "tinderbox",
+        "toad batta",
+        "tomato",
+        "torch",
+        "tortugan scute",
+        "trapper's tipple",
+        "triangle sandwich",
+        "uncut ruby",
+        "uncut sapphire",
+        "vial",
+        "vial of water",
+        "washing bowl",
+        "water rune",
+        "waterskin",
+        "white apron",
+        "white berries",
+        "white cog",
+        "wine of zamorak",
+        "wizard blizzard",
+        "wizard hat",
+        "wolf bones",
+        "wooden shield",
+        "yellow dye"
+        ));
 
     @Inject private Client client;
     @Inject private ClientThread clientThread;
@@ -716,6 +1091,39 @@ public class ZeroGpRacePlugin extends Plugin
         rememberDrops(event.getItems(), "PVP");
     }
 
+
+    private boolean isApprovedWorldSpawn(int itemId, int quantity)
+    {
+        if (itemId <= 0 || quantity <= 0 || quantity > MAX_WORLD_SPAWN_STACK)
+        {
+            return false;
+        }
+
+        String name = itemManager.getItemComposition(itemId).getName();
+        if (name == null || name.trim().isEmpty())
+        {
+            return false;
+        }
+
+        String normalised = normaliseWorldSpawnName(name);
+
+        // The Wiki labels this spawn as Superantipoison, while the actual
+        // one-dose item may be presented by the client as Superantipoison(1).
+        if ("superantipoison(1)".equals(normalised))
+        {
+            normalised = "superantipoison";
+        }
+
+        return APPROVED_WORLD_SPAWN_NAMES.contains(normalised);
+    }
+
+    private static String normaliseWorldSpawnName(String name)
+    {
+        return String.valueOf(name)
+            .trim()
+            .toLowerCase(Locale.ROOT);
+    }
+
     @Subscribe
     public void onItemSpawned(ItemSpawned event)
     {
@@ -730,10 +1138,12 @@ public class ZeroGpRacePlugin extends Plugin
             return;
         }
 
-        // Natural map spawns have no player ownership. Player-dropped items are
-        // SELF/OTHER/GROUP and are deliberately not made eligible here. NPC and
-        // PvP loot are already registered by their dedicated loot events.
-        if (item.getOwnership() == TileItem.OWNERSHIP_NONE)
+        // Natural map spawns have no player ownership, but OWNERSHIP_NONE alone
+        // is not trusted: only the approved static-spawn whitelist and safe
+        // stack quantities may enter through WORLD SPAWN provenance. NPC and
+        // PvP loot are registered by their dedicated loot events.
+        if (item.getOwnership() == TileItem.OWNERSHIP_NONE
+            && isApprovedWorldSpawn(item.getId(), item.getQuantity()))
         {
             eligibleDrops.addLast(new EligibleDrop(
                 item.getId(),
@@ -2503,8 +2913,9 @@ public class ZeroGpRacePlugin extends Plugin
      * RuneLite only emits ItemSpawned when an item enters the loaded scene.
      * A natural map spawn can already be visible before the race starts, so
      * there may be no ItemSpawned event after tracking begins. Seed those
-     * currently-visible, unowned ground items when the race starts so the
-     * very first pickup is eligible too.
+     * currently-visible, approved static ground items when the race starts so
+     * legitimate item-spawn methods still work. The same whitelist and stack
+     * cap are applied here as in ItemSpawned.
      */
     private void primeVisibleWorldSpawns()
     {
@@ -2559,7 +2970,8 @@ public class ZeroGpRacePlugin extends Plugin
                         if (item != null
                             && item.getId() > 0
                             && item.getQuantity() > 0
-                            && item.getOwnership() == TileItem.OWNERSHIP_NONE)
+                            && item.getOwnership() == TileItem.OWNERSHIP_NONE
+                            && isApprovedWorldSpawn(item.getId(), item.getQuantity()))
                         {
                             eligibleDrops.addLast(new EligibleDrop(
                                 item.getId(),
@@ -2742,18 +3154,34 @@ public class ZeroGpRacePlugin extends Plugin
                         continue;
                     }
 
-                    long value =
+                    long physicalValue =
                         itemMarketValue(itemId, lost);
 
-                    if (value > 0L)
+                    if (physicalValue > 0L)
                     {
-                        walletManager.addBankValue(value);
+                        long creditedBasis =
+                            walletManager.consumeInventoryBasis(
+                                itemId,
+                                lost);
+
+                        if (creditedBasis > 0L)
+                        {
+                            walletManager.addBankValue(
+                                creditedBasis);
+                        }
+
+                        long rejectedValue =
+                            Math.max(
+                                0L,
+                                physicalValue - creditedBasis);
 
                         log.info(
-                            "0GP BANK V6 | FIRST DEPOSIT | item={} qty={} value={} bankValue={}",
+                            "0GP BANK V6 | FIRST DEPOSIT | item={} qty={} physical={} creditedBasis={} rejected={} bankValue={}",
                             itemId,
                             lost,
-                            value,
+                            physicalValue,
+                            creditedBasis,
+                            rejectedValue,
                             walletManager.getBankValueGp());
                     }
                 }
@@ -2776,10 +3204,11 @@ public class ZeroGpRacePlugin extends Plugin
          * There is no race-owned-item identity in the bank.
          *
          * Deposit:
-         *   Bank Value += current traded value
+         *   Bank Value += legitimate inventory basis actually carried
          *
          * Withdraw:
-         *   Bank Value -= current traded value
+         *   Bank Value -= current traded value and attaches that value as
+         *   inventory basis to the withdrawn stack
          *
          * Item ID is used only to look up the traded price for this movement.
          */
@@ -2795,24 +3224,49 @@ public class ZeroGpRacePlugin extends Plugin
                 continue;
             }
 
-            long value =
+            long physicalValue =
                 itemMarketValue(itemId, increase);
 
-            if (value <= 0L)
+            if (physicalValue <= 0L)
             {
                 continue;
             }
 
-            walletManager.consumeInventoryBasis(
-                itemId,
-                increase);
-            walletManager.addBankValue(value);
+            /*
+             * BANK DEPOSIT CREDIT MUST COME FROM INVENTORY BASIS.
+             *
+             * Physical inventory can contain more value than the race owns
+             * (for example a rejected world pickup). Depositing that extra
+             * physical value must not mint new Bank Value.
+             *
+             * Example:
+             *   legitimate basis = 2,000 GP
+             *   physical deposit = 4,000 coins
+             *   Bank Value credit = 2,000 GP only
+             */
+            long creditedBasis =
+                walletManager.consumeInventoryBasis(
+                    itemId,
+                    increase);
+
+            if (creditedBasis > 0L)
+            {
+                walletManager.addBankValue(
+                    creditedBasis);
+            }
+
+            long rejectedValue =
+                Math.max(
+                    0L,
+                    physicalValue - creditedBasis);
 
             log.info(
-                "0GP BANK V6 | DEPOSIT | item={} qty={} value={} bankValue={}",
+                "0GP BANK V6 | DEPOSIT | item={} qty={} physical={} creditedBasis={} rejected={} bankValue={}",
                 itemId,
                 increase,
-                value,
+                physicalValue,
+                creditedBasis,
+                rejectedValue,
                 walletManager.getBankValueGp());
         }
 
