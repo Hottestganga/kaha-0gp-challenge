@@ -1,4 +1,5 @@
 'use strict';
+require("./discord-bot");
 
 const http = require('http');
 const { URL } = require('url');

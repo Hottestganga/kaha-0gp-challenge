@@ -9,6 +9,6 @@ services:
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
-        value: 22
+        value: 24.17.0
       - key: ROOM_TTL_MS
         value: 86400000
