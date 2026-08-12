@@ -55,6 +55,88 @@ if (!token) {
         }
     }
 
+    function parseBrisbaneDateTime(dateText, timeText) {
+        const dateMatch = dateText.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+        if (!dateMatch) {
+            return null;
+        }
+
+        const day = Number(dateMatch[1]);
+        const month = Number(dateMatch[2]);
+        const year = Number(dateMatch[3]);
+
+        let time = timeText.trim().toUpperCase();
+
+        const timeMatch = time.match(
+            /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/
+        );
+
+        if (!timeMatch) {
+            return null;
+        }
+
+        let hour = Number(timeMatch[1]);
+        const minute = Number(timeMatch[2]);
+        const ampm = timeMatch[3];
+
+        if (minute < 0 || minute > 59) {
+            return null;
+        }
+
+        if (ampm) {
+            if (hour < 1 || hour > 12) {
+                return null;
+            }
+
+            if (ampm === "AM" && hour === 12) {
+                hour = 0;
+            }
+
+            if (ampm === "PM" && hour !== 12) {
+                hour += 12;
+            }
+        } else {
+            if (hour < 0 || hour > 23) {
+                return null;
+            }
+        }
+
+        /*
+         * Brisbane / Queensland is UTC+10 year-round.
+         *
+         * We convert the host's Brisbane time to UTC
+         * so Discord can display it correctly for everyone.
+         */
+        const utcMillis = Date.UTC(
+            year,
+            month - 1,
+            day,
+            hour - 10,
+            minute,
+            0
+        );
+
+        const date = new Date(utcMillis);
+
+        /*
+         * Verify the date wasn't something invalid like 32/08/2026.
+         */
+        const check = new Date(utcMillis + (10 * 60 * 60 * 1000));
+
+        if (
+            check.getUTCFullYear() !== year ||
+            check.getUTCMonth() !== month - 1 ||
+            check.getUTCDate() !== day ||
+            check.getUTCHours() !== hour ||
+            check.getUTCMinutes() !== minute
+        ) {
+            return null;
+        }
+
+        return Math.floor(date.getTime() / 1000);
+    }
+
     client.once("clientReady", async () => {
         console.log(`[Discord] Bot online as ${client.user.tag}`);
         await registerCommands();
@@ -95,28 +177,28 @@ if (!token) {
                     .setRequired(true)
                     .setMaxLength(3);
 
-                const startTimeInput = new TextInputBuilder()
-                    .setCustomId("startTime")
-                    .setLabel("Start Time")
-                    .setPlaceholder("Example: 7:30 PM AEST or Starting Now")
+                const startDateInput = new TextInputBuilder()
+                    .setCustomId("startDate")
+                    .setLabel("Start Date")
+                    .setPlaceholder("Example: 12/08/2026")
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true)
-                    .setMaxLength(50);
+                    .setMaxLength(10);
 
-                const rulesInput = new TextInputBuilder()
-                    .setCustomId("rules")
-                    .setLabel("Special Rules")
-                    .setPlaceholder("Leave blank for standard 0GP Race rules")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(false)
-                    .setMaxLength(500);
+                const startTimeInput = new TextInputBuilder()
+                    .setCustomId("startTime")
+                    .setLabel("Start Time - Brisbane Time")
+                    .setPlaceholder("Example: 11:00 AM")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true)
+                    .setMaxLength(20);
 
                 modal.addComponents(
                     new ActionRowBuilder().addComponents(durationInput),
                     new ActionRowBuilder().addComponents(startingGpInput),
                     new ActionRowBuilder().addComponents(playersInput),
-                    new ActionRowBuilder().addComponents(startTimeInput),
-                    new ActionRowBuilder().addComponents(rulesInput)
+                    new ActionRowBuilder().addComponents(startDateInput),
+                    new ActionRowBuilder().addComponents(startTimeInput)
                 );
 
                 await interaction.showModal(modal);
@@ -137,12 +219,27 @@ if (!token) {
             const players =
                 interaction.fields.getTextInputValue("players");
 
+            const startDate =
+                interaction.fields.getTextInputValue("startDate");
+
             const startTime =
                 interaction.fields.getTextInputValue("startTime");
 
-            const rules =
-                interaction.fields.getTextInputValue("rules") ||
-                "Standard 0GP Race rules";
+            const unixTimestamp =
+                parseBrisbaneDateTime(startDate, startTime);
+
+            if (!unixTimestamp) {
+                await interaction.reply({
+                    content:
+                        "❌ I couldn't understand that date or time.\n\n" +
+                        "Use this format:\n" +
+                        "**Date:** 12/08/2026\n" +
+                        "**Time:** 11:00 AM",
+                    ephemeral: true
+                });
+
+                return;
+            }
 
             await interaction.reply({
                 content:
@@ -150,8 +247,8 @@ if (!token) {
                     `**Duration:** ${duration}\n` +
                     `**Starting GP:** ${startingGp}\n` +
                     `**Maximum Players:** ${players}\n` +
-                    `**Start Time:** ${startTime}\n` +
-                    `**Rules:** ${rules}`,
+                    `**Start:** <t:${unixTimestamp}:F>\n` +
+                    `**Starts:** <t:${unixTimestamp}:R>`,
                 ephemeral: true
             });
 
