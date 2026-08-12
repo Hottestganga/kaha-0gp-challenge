@@ -21,9 +21,8 @@ const guildId = "1536652671543541887";
 const findRaceChannelId = "1536654494194995260";
 
 /*
- * Discord matchmaking race data.
- *
- * Key = Discord race post message ID
+ * Active Discord matchmaking races.
+ * Key = raceId
  */
 const discordRaces = new Map();
 
@@ -53,9 +52,7 @@ if (!token) {
 
     async function registerCommands() {
         try {
-            const rest =
-                new REST({ version: "10" })
-                    .setToken(token);
+            const rest = new REST({ version: "10" }).setToken(token);
 
             await rest.put(
                 Routes.applicationGuildCommands(
@@ -67,10 +64,7 @@ if (!token) {
                 }
             );
 
-            console.log(
-                "[Discord] /race create registered."
-            );
-
+            console.log("[Discord] /race create registered.");
         } catch (error) {
             console.error(
                 "[Discord] Failed to register commands:",
@@ -79,112 +73,72 @@ if (!token) {
         }
     }
 
-    function parseBrisbaneDateTime(
-        dateText,
-        timeText
-    ) {
-        const dateMatch =
-            dateText
-                .trim()
-                .match(
-                    /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/
-                );
+    function parseBrisbaneDateTime(dateText, timeText) {
+        const dateMatch = dateText
+            .trim()
+            .match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
 
         if (!dateMatch) {
             return null;
         }
 
-        const day =
-            Number(dateMatch[1]);
+        const day = Number(dateMatch[1]);
+        const month = Number(dateMatch[2]);
+        const year = Number(dateMatch[3]);
 
-        const month =
-            Number(dateMatch[2]);
+        const time = timeText
+            .trim()
+            .toUpperCase();
 
-        const year =
-            Number(dateMatch[3]);
-
-        const time =
-            timeText
-                .trim()
-                .toUpperCase();
-
-        const timeMatch =
-            time.match(
-                /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/
-            );
+        const timeMatch = time.match(
+            /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/
+        );
 
         if (!timeMatch) {
             return null;
         }
 
-        let hour =
-            Number(timeMatch[1]);
+        let hour = Number(timeMatch[1]);
+        const minute = Number(timeMatch[2]);
+        const ampm = timeMatch[3];
 
-        const minute =
-            Number(timeMatch[2]);
-
-        const ampm =
-            timeMatch[3];
-
-        if (
-            minute < 0 ||
-            minute > 59
-        ) {
+        if (minute < 0 || minute > 59) {
             return null;
         }
 
         if (ampm) {
-
-            if (
-                hour < 1 ||
-                hour > 12
-            ) {
+            if (hour < 1 || hour > 12) {
                 return null;
             }
 
-            if (
-                ampm === "AM" &&
-                hour === 12
-            ) {
+            if (ampm === "AM" && hour === 12) {
                 hour = 0;
             }
 
-            if (
-                ampm === "PM" &&
-                hour !== 12
-            ) {
+            if (ampm === "PM" && hour !== 12) {
                 hour += 12;
             }
-
         } else {
-
-            if (
-                hour < 0 ||
-                hour > 23
-            ) {
+            if (hour < 0 || hour > 23) {
                 return null;
             }
         }
 
         /*
-         * Brisbane / Queensland
-         * UTC+10 all year.
+         * Brisbane / Queensland = UTC+10 all year.
          */
-        const utcMillis =
-            Date.UTC(
-                year,
-                month - 1,
-                day,
-                hour - 10,
-                minute,
-                0
-            );
+        const utcMillis = Date.UTC(
+            year,
+            month - 1,
+            day,
+            hour - 10,
+            minute,
+            0
+        );
 
-        const check =
-            new Date(
-                utcMillis +
-                (10 * 60 * 60 * 1000)
-            );
+        const check = new Date(
+            utcMillis + (10 * 60 * 60 * 1000)
+        );
 
         if (
             check.getUTCFullYear() !== year ||
@@ -196,18 +150,12 @@ if (!token) {
             return null;
         }
 
-        return Math.floor(
-            utcMillis / 1000
-        );
+        return Math.floor(utcMillis / 1000);
     }
 
     function buildRaceEmbed(race) {
-
-        const acceptedCount =
-            race.acceptedPlayers.size;
-
         const currentPlayers =
-            1 + acceptedCount;
+            1 + race.acceptedPlayers.size;
 
         const full =
             currentPlayers >= race.maxPlayers;
@@ -226,52 +174,44 @@ if (!token) {
             .addFields(
                 {
                     name: "👑 Host",
-                    value:
-                        `<@${race.hostId}>`,
+                    value: `<@${race.hostId}>`,
                     inline: true
                 },
                 {
                     name: "👥 Players",
-                    value:
-                        `${currentPlayers} / ${race.maxPlayers}`,
+                    value: `${currentPlayers} / ${race.maxPlayers}`,
                     inline: true
                 },
                 {
                     name: "💰 Starting GP",
-                    value:
-                    race.startingGp,
+                    value: race.startingGp,
                     inline: true
                 },
                 {
                     name: "⏱️ Duration",
-                    value:
-                    race.duration,
+                    value: race.duration,
                     inline: true
                 },
                 {
                     name: "🕐 Start Time",
-                    value:
-                        `<t:${race.unixTimestamp}:F>`,
+                    value: `<t:${race.unixTimestamp}:F>`,
                     inline: false
                 },
                 {
                     name: "⏳ Starts",
-                    value:
-                        `<t:${race.unixTimestamp}:R>`,
+                    value: `<t:${race.unixTimestamp}:R>`,
                     inline: false
                 }
             )
             .setFooter({
-                text:
-                    full
-                        ? "🔴 RACE FULL"
-                        : "🟢 OPEN — RACERS WANTED"
+                text: full
+                    ? "🔴 RACE FULL"
+                    : "🟢 OPEN — RACERS WANTED"
             })
             .setTimestamp();
     }
 
     function buildRaceButtons(race) {
-
         const currentPlayers =
             1 + race.acceptedPlayers.size;
 
@@ -281,7 +221,7 @@ if (!token) {
         const applyButton =
             new ButtonBuilder()
                 .setCustomId(
-                    `applyRace:${race.messageId}`
+                    `applyRace:${race.raceId}`
                 )
                 .setLabel(
                     full
@@ -336,767 +276,701 @@ if (!token) {
         }
     }
 
-    client.once(
-        "clientReady",
-        async () => {
+    client.once("clientReady", async () => {
+        console.log(
+            `[Discord] Bot online as ${client.user.tag}`
+        );
 
-            console.log(
-                `[Discord] Bot online as ${client.user.tag}`
-            );
+        await registerCommands();
+    });
 
-            await registerCommands();
+    client.on("interactionCreate", async interaction => {
+
+        /*
+         * /race create
+         */
+        if (interaction.isChatInputCommand()) {
+
+            if (
+                interaction.commandName === "race" &&
+                interaction.options.getSubcommand() === "create"
+            ) {
+                const modal =
+                    new ModalBuilder()
+                        .setCustomId(
+                            "createRaceModal"
+                        )
+                        .setTitle(
+                            "🏁 Create a 0GP Race"
+                        );
+
+                const durationInput =
+                    new TextInputBuilder()
+                        .setCustomId("duration")
+                        .setLabel("Race Duration")
+                        .setPlaceholder(
+                            "Example: 1 Hour, 2 Hours, 30 Minutes"
+                        )
+                        .setStyle(
+                            TextInputStyle.Short
+                        )
+                        .setRequired(true)
+                        .setMaxLength(30);
+
+                const startingGpInput =
+                    new TextInputBuilder()
+                        .setCustomId("startingGp")
+                        .setLabel("Starting GP")
+                        .setPlaceholder(
+                            "Example: 0, 100K, 1M"
+                        )
+                        .setStyle(
+                            TextInputStyle.Short
+                        )
+                        .setRequired(true)
+                        .setMaxLength(30);
+
+                const playersInput =
+                    new TextInputBuilder()
+                        .setCustomId("players")
+                        .setLabel("Maximum Players")
+                        .setPlaceholder(
+                            "Example: 4, 8, 10"
+                        )
+                        .setStyle(
+                            TextInputStyle.Short
+                        )
+                        .setRequired(true)
+                        .setMaxLength(3);
+
+                const startDateInput =
+                    new TextInputBuilder()
+                        .setCustomId("startDate")
+                        .setLabel("Start Date")
+                        .setPlaceholder(
+                            "Example: 12/08/2026"
+                        )
+                        .setStyle(
+                            TextInputStyle.Short
+                        )
+                        .setRequired(true)
+                        .setMaxLength(10);
+
+                const startTimeInput =
+                    new TextInputBuilder()
+                        .setCustomId("startTime")
+                        .setLabel(
+                            "Start Time - Brisbane Time"
+                        )
+                        .setPlaceholder(
+                            "Example: 11:00 AM"
+                        )
+                        .setStyle(
+                            TextInputStyle.Short
+                        )
+                        .setRequired(true)
+                        .setMaxLength(20);
+
+                modal.addComponents(
+                    new ActionRowBuilder()
+                        .addComponents(durationInput),
+
+                    new ActionRowBuilder()
+                        .addComponents(startingGpInput),
+
+                    new ActionRowBuilder()
+                        .addComponents(playersInput),
+
+                    new ActionRowBuilder()
+                        .addComponents(startDateInput),
+
+                    new ActionRowBuilder()
+                        .addComponents(startTimeInput)
+                );
+
+                await interaction.showModal(modal);
+                return;
+            }
         }
-    );
 
-    client.on(
-        "interactionCreate",
-        async interaction => {
+        /*
+         * CREATE RACE FORM SUBMITTED
+         */
+        if (
+            interaction.isModalSubmit() &&
+            interaction.customId === "createRaceModal"
+        ) {
+            const duration =
+                interaction.fields
+                    .getTextInputValue("duration");
 
-            /*
-             * /race create
-             */
+            const startingGp =
+                interaction.fields
+                    .getTextInputValue("startingGp");
+
+            const playersText =
+                interaction.fields
+                    .getTextInputValue("players");
+
+            const startDate =
+                interaction.fields
+                    .getTextInputValue("startDate");
+
+            const startTime =
+                interaction.fields
+                    .getTextInputValue("startTime");
+
+            const maxPlayers =
+                Number(playersText);
+
             if (
-                interaction.isChatInputCommand()
+                !Number.isInteger(maxPlayers) ||
+                maxPlayers < 2 ||
+                maxPlayers > 100
             ) {
-                if (
-                    interaction.commandName === "race" &&
-                    interaction.options.getSubcommand() === "create"
-                ) {
-                    const modal =
-                        new ModalBuilder()
-                            .setCustomId(
-                                "createRaceModal"
-                            )
-                            .setTitle(
-                                "🏁 Create a 0GP Race"
-                            );
-
-                    const durationInput =
-                        new TextInputBuilder()
-                            .setCustomId(
-                                "duration"
-                            )
-                            .setLabel(
-                                "Race Duration"
-                            )
-                            .setPlaceholder(
-                                "Example: 1 Hour, 2 Hours, 30 Minutes"
-                            )
-                            .setStyle(
-                                TextInputStyle.Short
-                            )
-                            .setRequired(true)
-                            .setMaxLength(30);
-
-                    const startingGpInput =
-                        new TextInputBuilder()
-                            .setCustomId(
-                                "startingGp"
-                            )
-                            .setLabel(
-                                "Starting GP"
-                            )
-                            .setPlaceholder(
-                                "Example: 0, 100K, 1M"
-                            )
-                            .setStyle(
-                                TextInputStyle.Short
-                            )
-                            .setRequired(true)
-                            .setMaxLength(30);
-
-                    const playersInput =
-                        new TextInputBuilder()
-                            .setCustomId(
-                                "players"
-                            )
-                            .setLabel(
-                                "Maximum Players"
-                            )
-                            .setPlaceholder(
-                                "Example: 4, 8, 10"
-                            )
-                            .setStyle(
-                                TextInputStyle.Short
-                            )
-                            .setRequired(true)
-                            .setMaxLength(3);
-
-                    const startDateInput =
-                        new TextInputBuilder()
-                            .setCustomId(
-                                "startDate"
-                            )
-                            .setLabel(
-                                "Start Date"
-                            )
-                            .setPlaceholder(
-                                "Example: 12/08/2026"
-                            )
-                            .setStyle(
-                                TextInputStyle.Short
-                            )
-                            .setRequired(true)
-                            .setMaxLength(10);
-
-                    const startTimeInput =
-                        new TextInputBuilder()
-                            .setCustomId(
-                                "startTime"
-                            )
-                            .setLabel(
-                                "Start Time - Brisbane Time"
-                            )
-                            .setPlaceholder(
-                                "Example: 11:00 AM"
-                            )
-                            .setStyle(
-                                TextInputStyle.Short
-                            )
-                            .setRequired(true)
-                            .setMaxLength(20);
-
-                    modal.addComponents(
-                        new ActionRowBuilder()
-                            .addComponents(
-                                durationInput
-                            ),
-
-                        new ActionRowBuilder()
-                            .addComponents(
-                                startingGpInput
-                            ),
-
-                        new ActionRowBuilder()
-                            .addComponents(
-                                playersInput
-                            ),
-
-                        new ActionRowBuilder()
-                            .addComponents(
-                                startDateInput
-                            ),
-
-                        new ActionRowBuilder()
-                            .addComponents(
-                                startTimeInput
-                            )
-                    );
-
-                    await interaction.showModal(
-                        modal
-                    );
-
-                    return;
-                }
-            }
-
-            /*
-             * Race form submitted
-             */
-            if (
-                interaction.isModalSubmit() &&
-                interaction.customId ===
-                "createRaceModal"
-            ) {
-
-                const duration =
-                    interaction.fields
-                        .getTextInputValue(
-                            "duration"
-                        );
-
-                const startingGp =
-                    interaction.fields
-                        .getTextInputValue(
-                            "startingGp"
-                        );
-
-                const playersText =
-                    interaction.fields
-                        .getTextInputValue(
-                            "players"
-                        );
-
-                const startDate =
-                    interaction.fields
-                        .getTextInputValue(
-                            "startDate"
-                        );
-
-                const startTime =
-                    interaction.fields
-                        .getTextInputValue(
-                            "startTime"
-                        );
-
-                const maxPlayers =
-                    Number(playersText);
-
-                if (
-                    !Number.isInteger(
-                        maxPlayers
-                    ) ||
-                    maxPlayers < 2 ||
-                    maxPlayers > 100
-                ) {
-                    await interaction.reply({
-                        content:
-                            "❌ Maximum Players must be a number between 2 and 100.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                const unixTimestamp =
-                    parseBrisbaneDateTime(
-                        startDate,
-                        startTime
-                    );
-
-                if (!unixTimestamp) {
-                    await interaction.reply({
-                        content:
-                            "❌ I couldn't understand that date or time.\n\n" +
-                            "Use this format:\n" +
-                            "**Date:** 12/08/2026\n" +
-                            "**Time:** 11:00 AM",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                try {
-                    const findRaceChannel =
-                        await client.channels.fetch(
-                            findRaceChannelId
-                        );
-
-                    if (
-                        !findRaceChannel ||
-                        !findRaceChannel.isTextBased()
-                    ) {
-                        await interaction.reply({
-                            content:
-                                "❌ I couldn't access the #find-a-race channel.",
-                            flags:
-                            MessageFlags.Ephemeral
-                        });
-
-                        return;
-                    }
-
-                    /*
-                     * Send initial post first.
-                     * We need Discord's message ID
-                     * to use as the race ID.
-                     */
-                    const temporaryRace = {
-                        hostId:
-                        interaction.user.id,
-
-                        hostTag:
-                        interaction.user.tag,
-
-                        duration,
-                        startingGp,
-                        maxPlayers,
-                        unixTimestamp,
-
-                        acceptedPlayers:
-                            new Set(),
-
-                        pendingPlayers:
-                            new Set(),
-
-                        messageId:
-                            "pending"
-                    };
-
-                    const raceMessage =
-                        await findRaceChannel.send({
-                            embeds: [
-                                buildRaceEmbed(
-                                    temporaryRace
-                                )
-                            ]
-                        });
-
-                    temporaryRace.messageId =
-                        raceMessage.id;
-
-                    discordRaces.set(
-                        raceMessage.id,
-                        temporaryRace
-                    );
-
-                    await raceMessage.edit({
-                        embeds: [
-                            buildRaceEmbed(
-                                temporaryRace
-                            )
-                        ],
-                        components: [
-                            buildRaceButtons(
-                                temporaryRace
-                            )
-                        ]
-                    });
-
-                    await interaction.reply({
-                        content:
-                            `✅ Your race has been posted in <#${findRaceChannelId}>.`,
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    console.log(
-                        `[Discord] Race ${raceMessage.id} posted by ${interaction.user.tag}`
-                    );
-
-                } catch (error) {
-
-                    console.error(
-                        "[Discord] Failed to post race:",
-                        error
-                    );
-
-                    if (
-                        !interaction.replied
-                    ) {
-                        await interaction.reply({
-                            content:
-                                "❌ Something went wrong while posting the race.",
-                            flags:
-                            MessageFlags.Ephemeral
-                        });
-                    }
-                }
-
-                return;
-            }
-
-            /*
-             * APPLY TO RACE
-             */
-            if (
-                interaction.isButton() &&
-                interaction.customId.startsWith(
-                    "applyRace:"
-                )
-            ) {
-
-                const raceId =
-                    interaction.customId
-                        .split(":")[1];
-
-                const race =
-                    discordRaces.get(
-                        raceId
-                    );
-
-                if (!race) {
-                    await interaction.reply({
-                        content:
-                            "❌ This race is no longer active. The bot may have restarted.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                const applicantId =
-                    interaction.user.id;
-
-                if (
-                    applicantId ===
-                    race.hostId
-                ) {
-                    await interaction.reply({
-                        content:
-                            "👑 You're the host of this race — you don't need to apply.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                if (
-                    race.acceptedPlayers.has(
-                        applicantId
-                    )
-                ) {
-                    await interaction.reply({
-                        content:
-                            "✅ You're already accepted into this race.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                if (
-                    race.pendingPlayers.has(
-                        applicantId
-                    )
-                ) {
-                    await interaction.reply({
-                        content:
-                            "⏳ You've already applied to this race. The host hasn't responded yet.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                const currentPlayers =
-                    1 +
-                    race.acceptedPlayers.size;
-
-                if (
-                    currentPlayers >=
-                    race.maxPlayers
-                ) {
-                    await interaction.reply({
-                        content:
-                            "❌ This race is already full.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                try {
-                    const host =
-                        await client.users.fetch(
-                            race.hostId
-                        );
-
-                    const acceptButton =
-                        new ButtonBuilder()
-                            .setCustomId(
-                                `acceptRace:${raceId}:${applicantId}`
-                            )
-                            .setLabel(
-                                "Accept"
-                            )
-                            .setEmoji("✅")
-                            .setStyle(
-                                ButtonStyle.Success
-                            );
-
-                    const declineButton =
-                        new ButtonBuilder()
-                            .setCustomId(
-                                `declineRace:${raceId}:${applicantId}`
-                            )
-                            .setLabel(
-                                "Decline"
-                            )
-                            .setEmoji("❌")
-                            .setStyle(
-                                ButtonStyle.Danger
-                            );
-
-                    const approvalRow =
-                        new ActionRowBuilder()
-                            .addComponents(
-                                acceptButton,
-                                declineButton
-                            );
-
-                    await host.send({
-                        content:
-                            `🏁 **New Race Application**\n\n` +
-                            `**Player:** <@${applicantId}>\n` +
-                            `**Duration:** ${race.duration}\n` +
-                            `**Starting GP:** ${race.startingGp}\n` +
-                            `**Start:** <t:${race.unixTimestamp}:F>\n` +
-                            `**Starts:** <t:${race.unixTimestamp}:R>\n\n` +
-                            `Would you like to accept this player?`,
-                        components: [
-                            approvalRow
-                        ]
-                    });
-
-                    race.pendingPlayers.add(
-                        applicantId
-                    );
-
-                    await interaction.reply({
-                        content:
-                            "✅ Application sent to the race host. You'll be notified when they accept or decline you.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    console.log(
-                        `[Discord] ${interaction.user.tag} applied to race ${raceId}`
-                    );
-
-                } catch (error) {
-
-                    console.error(
-                        "[Discord] Failed to send host application DM:",
-                        error
-                    );
-
-                    await interaction.reply({
-                        content:
-                            "❌ I couldn't send the race host a DM. The host may have Discord DMs disabled.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-                }
-
-                return;
-            }
-
-            /*
-             * ACCEPT APPLICANT
-             */
-            if (
-                interaction.isButton() &&
-                interaction.customId.startsWith(
-                    "acceptRace:"
-                )
-            ) {
-
-                const parts =
-                    interaction.customId
-                        .split(":");
-
-                const raceId =
-                    parts[1];
-
-                const applicantId =
-                    parts[2];
-
-                const race =
-                    discordRaces.get(
-                        raceId
-                    );
-
-                if (!race) {
-                    await interaction.reply({
-                        content:
-                            "❌ This race is no longer active.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                if (
-                    interaction.user.id !==
-                    race.hostId
-                ) {
-                    await interaction.reply({
-                        content:
-                            "❌ Only the race host can accept applicants.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                if (
-                    !race.pendingPlayers.has(
-                        applicantId
-                    )
-                ) {
-                    await interaction.reply({
-                        content:
-                            "⚠️ This application has already been handled.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                const currentPlayers =
-                    1 +
-                    race.acceptedPlayers.size;
-
-                if (
-                    currentPlayers >=
-                    race.maxPlayers
-                ) {
-                    race.pendingPlayers.delete(
-                        applicantId
-                    );
-
-                    await interaction.update({
-                        content:
-                            "❌ Race is already full. This applicant could not be accepted.",
-                        components: []
-                    });
-
-                    return;
-                }
-
-                race.pendingPlayers.delete(
-                    applicantId
-                );
-
-                race.acceptedPlayers.add(
-                    applicantId
-                );
-
-                await interaction.update({
+                await interaction.reply({
                     content:
-                        `✅ <@${applicantId}> has been accepted into the race.`,
-                    components: []
+                        "❌ Maximum Players must be a number between 2 and 100.",
+                    flags:
+                    MessageFlags.Ephemeral
                 });
 
-                await updateRacePost(
+                return;
+            }
+
+            const unixTimestamp =
+                parseBrisbaneDateTime(
+                    startDate,
+                    startTime
+                );
+
+            if (!unixTimestamp) {
+                await interaction.reply({
+                    content:
+                        "❌ I couldn't understand that date or time.\n\n" +
+                        "Use this format:\n" +
+                        "**Date:** 12/08/2026\n" +
+                        "**Time:** 11:00 AM",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            try {
+                const findRaceChannel =
+                    await client.channels.fetch(
+                        findRaceChannelId
+                    );
+
+                if (
+                    !findRaceChannel ||
+                    !findRaceChannel.isTextBased()
+                ) {
+                    await interaction.reply({
+                        content:
+                            "❌ I couldn't access the #find-a-race channel.",
+                        flags:
+                        MessageFlags.Ephemeral
+                    });
+
+                    return;
+                }
+
+                /*
+                 * Generate our own race ID BEFORE
+                 * sending the Discord message.
+                 *
+                 * This lets us include the Apply button
+                 * in the original message.
+                 */
+                const raceId =
+                    `${Date.now()}-${interaction.user.id}`;
+
+                const race = {
+                    raceId,
+
+                    hostId:
+                    interaction.user.id,
+
+                    hostTag:
+                    interaction.user.tag,
+
+                    duration,
+                    startingGp,
+                    maxPlayers,
+                    unixTimestamp,
+
+                    acceptedPlayers:
+                        new Set(),
+
+                    pendingPlayers:
+                        new Set(),
+
+                    messageId:
+                        null
+                };
+
+                /*
+                 * Send the race WITH the Apply button
+                 * immediately.
+                 */
+                const raceMessage =
+                    await findRaceChannel.send({
+                        embeds: [
+                            buildRaceEmbed(race)
+                        ],
+                        components: [
+                            buildRaceButtons(race)
+                        ]
+                    });
+
+                race.messageId =
+                    raceMessage.id;
+
+                discordRaces.set(
+                    raceId,
                     race
                 );
 
-                try {
-                    const applicant =
-                        await client.users.fetch(
-                            applicantId
+                await interaction.reply({
+                    content:
+                        `✅ Your race has been posted in <#${findRaceChannelId}>.`,
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                console.log(
+                    `[Discord] Race ${raceId} posted by ${interaction.user.tag}`
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "[Discord] Failed to post race:",
+                    error
+                );
+
+                if (!interaction.replied) {
+                    await interaction.reply({
+                        content:
+                            "❌ Something went wrong while posting the race.",
+                        flags:
+                        MessageFlags.Ephemeral
+                    });
+                }
+            }
+
+            return;
+        }
+
+        /*
+         * APPLY TO RACE
+         */
+        if (
+            interaction.isButton() &&
+            interaction.customId.startsWith(
+                "applyRace:"
+            )
+        ) {
+            const raceId =
+                interaction.customId
+                    .split(":")[1];
+
+            const race =
+                discordRaces.get(
+                    raceId
+                );
+
+            if (!race) {
+                await interaction.reply({
+                    content:
+                        "❌ This race is no longer active. The bot may have restarted.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            const applicantId =
+                interaction.user.id;
+
+            if (
+                applicantId === race.hostId
+            ) {
+                await interaction.reply({
+                    content:
+                        "👑 You're the host of this race — you don't need to apply.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            if (
+                race.acceptedPlayers.has(
+                    applicantId
+                )
+            ) {
+                await interaction.reply({
+                    content:
+                        "✅ You're already accepted into this race.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            if (
+                race.pendingPlayers.has(
+                    applicantId
+                )
+            ) {
+                await interaction.reply({
+                    content:
+                        "⏳ You've already applied to this race. The host hasn't responded yet.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            const currentPlayers =
+                1 +
+                race.acceptedPlayers.size;
+
+            if (
+                currentPlayers >=
+                race.maxPlayers
+            ) {
+                await interaction.reply({
+                    content:
+                        "❌ This race is already full.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            try {
+                const host =
+                    await client.users.fetch(
+                        race.hostId
+                    );
+
+                const acceptButton =
+                    new ButtonBuilder()
+                        .setCustomId(
+                            `acceptRace:${raceId}:${applicantId}`
+                        )
+                        .setLabel("Accept")
+                        .setEmoji("✅")
+                        .setStyle(
+                            ButtonStyle.Success
                         );
 
-                    await applicant.send(
-                        `🏁 **Application Accepted!**\n\n` +
-                        `You've been accepted into <@${race.hostId}>'s 0GP Race.\n\n` +
+                const declineButton =
+                    new ButtonBuilder()
+                        .setCustomId(
+                            `declineRace:${raceId}:${applicantId}`
+                        )
+                        .setLabel("Decline")
+                        .setEmoji("❌")
+                        .setStyle(
+                            ButtonStyle.Danger
+                        );
+
+                const approvalRow =
+                    new ActionRowBuilder()
+                        .addComponents(
+                            acceptButton,
+                            declineButton
+                        );
+
+                await host.send({
+                    content:
+                        `🏁 **New Race Application**\n\n` +
+                        `**Player:** <@${applicantId}>\n` +
                         `**Duration:** ${race.duration}\n` +
                         `**Starting GP:** ${race.startingGp}\n` +
                         `**Start:** <t:${race.unixTimestamp}:F>\n` +
                         `**Starts:** <t:${race.unixTimestamp}:R>\n\n` +
-                        `The private RuneLite room code will be added to this system next.`
-                    );
+                        `Would you like to accept this player?`,
+                    components: [
+                        approvalRow
+                    ]
+                });
 
-                } catch (error) {
-                    console.error(
-                        "[Discord] Could not DM accepted applicant:",
-                        error
-                    );
-                }
+                race.pendingPlayers.add(
+                    applicantId
+                );
+
+                await interaction.reply({
+                    content:
+                        "✅ Application sent to the race host. You'll be notified when they accept or decline you.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
 
                 console.log(
-                    `[Discord] Applicant ${applicantId} accepted into race ${raceId}`
+                    `[Discord] ${interaction.user.tag} applied to race ${raceId}`
                 );
+
+            } catch (error) {
+
+                console.error(
+                    "[Discord] Failed to send host application DM:",
+                    error
+                );
+
+                await interaction.reply({
+                    content:
+                        "❌ I couldn't send the race host a DM. The host may have Discord DMs disabled.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+            }
+
+            return;
+        }
+
+        /*
+         * ACCEPT APPLICANT
+         */
+        if (
+            interaction.isButton() &&
+            interaction.customId.startsWith(
+                "acceptRace:"
+            )
+        ) {
+            const parts =
+                interaction.customId
+                    .split(":");
+
+            const raceId =
+                parts[1];
+
+            const applicantId =
+                parts[2];
+
+            const race =
+                discordRaces.get(
+                    raceId
+                );
+
+            if (!race) {
+                await interaction.reply({
+                    content:
+                        "❌ This race is no longer active.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
 
                 return;
             }
 
-            /*
-             * DECLINE APPLICANT
-             */
             if (
-                interaction.isButton() &&
-                interaction.customId.startsWith(
-                    "declineRace:"
+                interaction.user.id !==
+                race.hostId
+            ) {
+                await interaction.reply({
+                    content:
+                        "❌ Only the race host can accept applicants.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            if (
+                !race.pendingPlayers.has(
+                    applicantId
                 )
             ) {
+                await interaction.reply({
+                    content:
+                        "⚠️ This application has already been handled.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
 
-                const parts =
-                    interaction.customId
-                        .split(":");
+                return;
+            }
 
-                const raceId =
-                    parts[1];
+            const currentPlayers =
+                1 +
+                race.acceptedPlayers.size;
 
-                const applicantId =
-                    parts[2];
-
-                const race =
-                    discordRaces.get(
-                        raceId
-                    );
-
-                if (!race) {
-                    await interaction.reply({
-                        content:
-                            "❌ This race is no longer active.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                if (
-                    interaction.user.id !==
-                    race.hostId
-                ) {
-                    await interaction.reply({
-                        content:
-                            "❌ Only the race host can decline applicants.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
-                if (
-                    !race.pendingPlayers.has(
-                        applicantId
-                    )
-                ) {
-                    await interaction.reply({
-                        content:
-                            "⚠️ This application has already been handled.",
-                        flags:
-                        MessageFlags.Ephemeral
-                    });
-
-                    return;
-                }
-
+            if (
+                currentPlayers >=
+                race.maxPlayers
+            ) {
                 race.pendingPlayers.delete(
                     applicantId
                 );
 
                 await interaction.update({
                     content:
-                        `❌ <@${applicantId}>'s application was declined.`,
+                        "❌ Race is already full. This applicant could not be accepted.",
                     components: []
                 });
 
-                try {
-                    const applicant =
-                        await client.users.fetch(
-                            applicantId
-                        );
+                return;
+            }
 
-                    await applicant.send(
-                        `❌ **Race Application Declined**\n\n` +
-                        `Your application for <@${race.hostId}>'s 0GP Race wasn't accepted this time.\n\n` +
-                        `You can apply for another race in <#${findRaceChannelId}>.`
+            race.pendingPlayers.delete(
+                applicantId
+            );
+
+            race.acceptedPlayers.add(
+                applicantId
+            );
+
+            await interaction.update({
+                content:
+                    `✅ <@${applicantId}> has been accepted into the race.`,
+                components: []
+            });
+
+            await updateRacePost(race);
+
+            try {
+                const applicant =
+                    await client.users.fetch(
+                        applicantId
                     );
 
-                } catch (error) {
-                    console.error(
-                        "[Discord] Could not DM declined applicant:",
-                        error
-                    );
-                }
-
-                console.log(
-                    `[Discord] Applicant ${applicantId} declined from race ${raceId}`
+                await applicant.send(
+                    `🏁 **Application Accepted!**\n\n` +
+                    `You've been accepted into <@${race.hostId}>'s 0GP Race.\n\n` +
+                    `**Duration:** ${race.duration}\n` +
+                    `**Starting GP:** ${race.startingGp}\n` +
+                    `**Start:** <t:${race.unixTimestamp}:F>\n` +
+                    `**Starts:** <t:${race.unixTimestamp}:R>\n\n` +
+                    `The private RuneLite room code will be added next.`
                 );
+
+            } catch (error) {
+                console.error(
+                    "[Discord] Could not DM accepted applicant:",
+                    error
+                );
+            }
+
+            console.log(
+                `[Discord] Applicant ${applicantId} accepted into race ${raceId}`
+            );
+
+            return;
+        }
+
+        /*
+         * DECLINE APPLICANT
+         */
+        if (
+            interaction.isButton() &&
+            interaction.customId.startsWith(
+                "declineRace:"
+            )
+        ) {
+            const parts =
+                interaction.customId
+                    .split(":");
+
+            const raceId =
+                parts[1];
+
+            const applicantId =
+                parts[2];
+
+            const race =
+                discordRaces.get(
+                    raceId
+                );
+
+            if (!race) {
+                await interaction.reply({
+                    content:
+                        "❌ This race is no longer active.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
 
                 return;
             }
+
+            if (
+                interaction.user.id !==
+                race.hostId
+            ) {
+                await interaction.reply({
+                    content:
+                        "❌ Only the race host can decline applicants.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            if (
+                !race.pendingPlayers.has(
+                    applicantId
+                )
+            ) {
+                await interaction.reply({
+                    content:
+                        "⚠️ This application has already been handled.",
+                    flags:
+                    MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            race.pendingPlayers.delete(
+                applicantId
+            );
+
+            await interaction.update({
+                content:
+                    `❌ <@${applicantId}>'s application was declined.`,
+                components: []
+            });
+
+            try {
+                const applicant =
+                    await client.users.fetch(
+                        applicantId
+                    );
+
+                await applicant.send(
+                    `❌ **Race Application Declined**\n\n` +
+                    `Your application for <@${race.hostId}>'s 0GP Race wasn't accepted this time.\n\n` +
+                    `You can apply for another race in <#${findRaceChannelId}>.`
+                );
+
+            } catch (error) {
+                console.error(
+                    "[Discord] Could not DM declined applicant:",
+                    error
+                );
+            }
+
+            console.log(
+                `[Discord] Applicant ${applicantId} declined from race ${raceId}`
+            );
+
+            return;
         }
-    );
+    });
 
     client.login(token)
         .catch(error => {
