@@ -7,13 +7,18 @@ const {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
-    ActionRowBuilder
+    ActionRowBuilder,
+    EmbedBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    MessageFlags
 } = require("discord.js");
 
 const token = process.env.DISCORD_BOT_TOKEN;
 const applicationId = process.env.DISCORD_APPLICATION_ID;
 
 const guildId = "1536652671543541887";
+const findRaceChannelId = "1536654494194995260";
 
 if (!token) {
     console.log("[Discord] DISCORD_BOT_TOKEN is not set. Bot disabled.");
@@ -56,7 +61,9 @@ if (!token) {
     }
 
     function parseBrisbaneDateTime(dateText, timeText) {
-        const dateMatch = dateText.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        const dateMatch = dateText
+            .trim()
+            .match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
 
         if (!dateMatch) {
             return null;
@@ -66,7 +73,7 @@ if (!token) {
         const month = Number(dateMatch[2]);
         const year = Number(dateMatch[3]);
 
-        let time = timeText.trim().toUpperCase();
+        const time = timeText.trim().toUpperCase();
 
         const timeMatch = time.match(
             /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/
@@ -104,9 +111,6 @@ if (!token) {
 
         /*
          * Brisbane / Queensland is UTC+10 year-round.
-         *
-         * We convert the host's Brisbane time to UTC
-         * so Discord can display it correctly for everyone.
          */
         const utcMillis = Date.UTC(
             year,
@@ -117,12 +121,8 @@ if (!token) {
             0
         );
 
-        const date = new Date(utcMillis);
-
-        /*
-         * Verify the date wasn't something invalid like 32/08/2026.
-         */
-        const check = new Date(utcMillis + (10 * 60 * 60 * 1000));
+        const check =
+            new Date(utcMillis + (10 * 60 * 60 * 1000));
 
         if (
             check.getUTCFullYear() !== year ||
@@ -134,16 +134,22 @@ if (!token) {
             return null;
         }
 
-        return Math.floor(date.getTime() / 1000);
+        return Math.floor(utcMillis / 1000);
     }
 
     client.once("clientReady", async () => {
-        console.log(`[Discord] Bot online as ${client.user.tag}`);
+        console.log(
+            `[Discord] Bot online as ${client.user.tag}`
+        );
+
         await registerCommands();
     });
 
     client.on("interactionCreate", async interaction => {
 
+        /*
+         * /race create
+         */
         if (interaction.isChatInputCommand()) {
             if (
                 interaction.commandName === "race" &&
@@ -153,52 +159,78 @@ if (!token) {
                     .setCustomId("createRaceModal")
                     .setTitle("🏁 Create a 0GP Race");
 
-                const durationInput = new TextInputBuilder()
-                    .setCustomId("duration")
-                    .setLabel("Race Duration")
-                    .setPlaceholder("Example: 1 Hour, 2 Hours, 30 Minutes")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setMaxLength(30);
+                const durationInput =
+                    new TextInputBuilder()
+                        .setCustomId("duration")
+                        .setLabel("Race Duration")
+                        .setPlaceholder(
+                            "Example: 1 Hour, 2 Hours, 30 Minutes"
+                        )
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setMaxLength(30);
 
-                const startingGpInput = new TextInputBuilder()
-                    .setCustomId("startingGp")
-                    .setLabel("Starting GP")
-                    .setPlaceholder("Example: 0, 100K, 1M")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setMaxLength(30);
+                const startingGpInput =
+                    new TextInputBuilder()
+                        .setCustomId("startingGp")
+                        .setLabel("Starting GP")
+                        .setPlaceholder(
+                            "Example: 0, 100K, 1M"
+                        )
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setMaxLength(30);
 
-                const playersInput = new TextInputBuilder()
-                    .setCustomId("players")
-                    .setLabel("Maximum Players")
-                    .setPlaceholder("Example: 4, 8, 10")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setMaxLength(3);
+                const playersInput =
+                    new TextInputBuilder()
+                        .setCustomId("players")
+                        .setLabel("Maximum Players")
+                        .setPlaceholder(
+                            "Example: 4, 8, 10"
+                        )
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setMaxLength(3);
 
-                const startDateInput = new TextInputBuilder()
-                    .setCustomId("startDate")
-                    .setLabel("Start Date")
-                    .setPlaceholder("Example: 12/08/2026")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setMaxLength(10);
+                const startDateInput =
+                    new TextInputBuilder()
+                        .setCustomId("startDate")
+                        .setLabel("Start Date")
+                        .setPlaceholder(
+                            "Example: 12/08/2026"
+                        )
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setMaxLength(10);
 
-                const startTimeInput = new TextInputBuilder()
-                    .setCustomId("startTime")
-                    .setLabel("Start Time - Brisbane Time")
-                    .setPlaceholder("Example: 11:00 AM")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true)
-                    .setMaxLength(20);
+                const startTimeInput =
+                    new TextInputBuilder()
+                        .setCustomId("startTime")
+                        .setLabel(
+                            "Start Time - Brisbane Time"
+                        )
+                        .setPlaceholder(
+                            "Example: 11:00 AM"
+                        )
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                        .setMaxLength(20);
 
                 modal.addComponents(
-                    new ActionRowBuilder().addComponents(durationInput),
-                    new ActionRowBuilder().addComponents(startingGpInput),
-                    new ActionRowBuilder().addComponents(playersInput),
-                    new ActionRowBuilder().addComponents(startDateInput),
-                    new ActionRowBuilder().addComponents(startTimeInput)
+                    new ActionRowBuilder()
+                        .addComponents(durationInput),
+
+                    new ActionRowBuilder()
+                        .addComponents(startingGpInput),
+
+                    new ActionRowBuilder()
+                        .addComponents(playersInput),
+
+                    new ActionRowBuilder()
+                        .addComponents(startDateInput),
+
+                    new ActionRowBuilder()
+                        .addComponents(startTimeInput)
                 );
 
                 await interaction.showModal(modal);
@@ -206,27 +238,55 @@ if (!token) {
             }
         }
 
+        /*
+         * Race creation form submitted
+         */
         if (
             interaction.isModalSubmit() &&
             interaction.customId === "createRaceModal"
         ) {
             const duration =
-                interaction.fields.getTextInputValue("duration");
+                interaction.fields
+                    .getTextInputValue("duration");
 
             const startingGp =
-                interaction.fields.getTextInputValue("startingGp");
+                interaction.fields
+                    .getTextInputValue("startingGp");
 
-            const players =
-                interaction.fields.getTextInputValue("players");
+            const playersText =
+                interaction.fields
+                    .getTextInputValue("players");
 
             const startDate =
-                interaction.fields.getTextInputValue("startDate");
+                interaction.fields
+                    .getTextInputValue("startDate");
 
             const startTime =
-                interaction.fields.getTextInputValue("startTime");
+                interaction.fields
+                    .getTextInputValue("startTime");
+
+            const maxPlayers =
+                Number(playersText);
+
+            if (
+                !Number.isInteger(maxPlayers) ||
+                maxPlayers < 2 ||
+                maxPlayers > 100
+            ) {
+                await interaction.reply({
+                    content:
+                        "❌ Maximum Players must be a number between 2 and 100.",
+                    flags: MessageFlags.Ephemeral
+                });
+
+                return;
+            }
 
             const unixTimestamp =
-                parseBrisbaneDateTime(startDate, startTime);
+                parseBrisbaneDateTime(
+                    startDate,
+                    startTime
+                );
 
             if (!unixTimestamp) {
                 await interaction.reply({
@@ -235,7 +295,150 @@ if (!token) {
                         "Use this format:\n" +
                         "**Date:** 12/08/2026\n" +
                         "**Time:** 11:00 AM",
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
+                });
+
+                return;
+            }
+
+            try {
+                const findRaceChannel =
+                    await client.channels.fetch(
+                        findRaceChannelId
+                    );
+
+                if (
+                    !findRaceChannel ||
+                    !findRaceChannel.isTextBased()
+                ) {
+                    await interaction.reply({
+                        content:
+                            "❌ I couldn't access the #find-a-race channel.",
+                        flags: MessageFlags.Ephemeral
+                    });
+
+                    return;
+                }
+
+                const raceEmbed =
+                    new EmbedBuilder()
+                        .setTitle(
+                            "🏁 NEW RACE — LOOKING FOR RACERS"
+                        )
+                        .setDescription(
+                            "A new 0GP Race is open for applications."
+                        )
+                        .addFields(
+                            {
+                                name: "👑 Host",
+                                value:
+                                    `<@${interaction.user.id}>`,
+                                inline: true
+                            },
+                            {
+                                name: "👥 Players",
+                                value:
+                                    `1 / ${maxPlayers}`,
+                                inline: true
+                            },
+                            {
+                                name: "💰 Starting GP",
+                                value:
+                                startingGp,
+                                inline: true
+                            },
+                            {
+                                name: "⏱️ Duration",
+                                value:
+                                duration,
+                                inline: true
+                            },
+                            {
+                                name: "🕐 Start Time",
+                                value:
+                                    `<t:${unixTimestamp}:F>`,
+                                inline: false
+                            },
+                            {
+                                name: "⏳ Starts",
+                                value:
+                                    `<t:${unixTimestamp}:R>`,
+                                inline: false
+                            }
+                        )
+                        .setFooter({
+                            text:
+                                "🟢 OPEN — RACERS WANTED"
+                        })
+                        .setTimestamp();
+
+                const applyButton =
+                    new ButtonBuilder()
+                        .setCustomId(
+                            `applyRace:${interaction.user.id}`
+                        )
+                        .setLabel("Apply to Race")
+                        .setEmoji("🏁")
+                        .setStyle(
+                            ButtonStyle.Success
+                        );
+
+                const buttonRow =
+                    new ActionRowBuilder()
+                        .addComponents(applyButton);
+
+                await findRaceChannel.send({
+                    embeds: [raceEmbed],
+                    components: [buttonRow]
+                });
+
+                await interaction.reply({
+                    content:
+                        `✅ Your race has been posted in <#${findRaceChannelId}>.`,
+                    flags: MessageFlags.Ephemeral
+                });
+
+                console.log(
+                    `[Discord] Race posted by ${interaction.user.tag}`
+                );
+
+            } catch (error) {
+                console.error(
+                    "[Discord] Failed to post race:",
+                    error
+                );
+
+                if (!interaction.replied) {
+                    await interaction.reply({
+                        content:
+                            "❌ Something went wrong while posting the race.",
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+            }
+
+            return;
+        }
+
+        /*
+         * Apply button test
+         */
+        if (
+            interaction.isButton() &&
+            interaction.customId.startsWith(
+                "applyRace:"
+            )
+        ) {
+            const hostId =
+                interaction.customId.split(":")[1];
+
+            if (
+                interaction.user.id === hostId
+            ) {
+                await interaction.reply({
+                    content:
+                        "👑 You're the host of this race — you don't need to apply.",
+                    flags: MessageFlags.Ephemeral
                 });
 
                 return;
@@ -243,22 +446,20 @@ if (!token) {
 
             await interaction.reply({
                 content:
-                    `🏁 **Race Form Received!**\n\n` +
-                    `**Duration:** ${duration}\n` +
-                    `**Starting GP:** ${startingGp}\n` +
-                    `**Maximum Players:** ${players}\n` +
-                    `**Start:** <t:${unixTimestamp}:F>\n` +
-                    `**Starts:** <t:${unixTimestamp}:R>`,
-                ephemeral: true
+                    "✅ Your Apply button worked. Host approval is the next part we're building.",
+                flags: MessageFlags.Ephemeral
             });
 
             console.log(
-                `[Discord] Race form submitted by ${interaction.user.tag}`
+                `[Discord] ${interaction.user.tag} clicked Apply to Race`
             );
         }
     });
 
     client.login(token).catch(error => {
-        console.error("[Discord] Failed to log in:", error);
+        console.error(
+            "[Discord] Failed to log in:",
+            error
+        );
     });
 }
